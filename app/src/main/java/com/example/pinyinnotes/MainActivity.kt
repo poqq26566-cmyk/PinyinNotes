@@ -85,7 +85,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshList() {
-        categoryRepository?.let { adapter.submitEntries(it.getAllCategories()) }
+        val repo = categoryRepository ?: return
+        Thread {
+            val list = repo.getAllCategories()
+            runOnUiThread { adapter.submitEntries(list) }
+        }.start()
     }
 
     private fun showAddCategoryDialog() {
@@ -97,8 +101,11 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    categoryRepository?.addCategory(name)
-                    refreshList()
+                    val repo = categoryRepository
+                    Thread {
+                        repo?.addCategory(name)
+                        runOnUiThread { refreshList() }
+                    }.start()
                 }
             }
             .setNegativeButton("取消", null)
@@ -110,8 +117,10 @@ class MainActivity : AppCompatActivity() {
             .setTitle("删除分类\u201c${category.name}\u201d")
             .setMessage("分类里的笔记会一起删除，确定吗？")
             .setPositiveButton("删除") { _, _ ->
-                DocStore.delete(this, category.uri)
-                refreshList()
+                Thread {
+                    DocStore.delete(this, category.uri)
+                    runOnUiThread { refreshList() }
+                }.start()
             }
             .setNegativeButton("取消", null)
             .show()
