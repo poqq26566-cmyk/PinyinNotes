@@ -84,11 +84,16 @@ class MainActivity : AppCompatActivity() {
         folderPicker.launch(intent)
     }
 
+    private var categories = mutableListOf<Category>()
+
     private fun refreshList() {
         val repo = categoryRepository ?: return
         Thread {
             val list = repo.getAllCategories()
-            runOnUiThread { adapter.submitEntries(list) }
+            runOnUiThread {
+                categories = list.toMutableList()
+                adapter.submitEntries(categories)
+            }
         }.start()
     }
 
@@ -103,8 +108,14 @@ class MainActivity : AppCompatActivity() {
                 if (name.isNotEmpty()) {
                     val repo = categoryRepository
                     Thread {
-                        repo?.addCategory(name)
-                        runOnUiThread { refreshList() }
+                        val newCategory = repo?.addCategory(name)
+                        runOnUiThread {
+                            if (newCategory != null) {
+                                categories.add(newCategory)
+                                categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                adapter.submitEntries(categories)
+                            }
+                        }
                     }.start()
                 }
             }
@@ -119,7 +130,10 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("删除") { _, _ ->
                 Thread {
                     DocStore.delete(this, category.uri)
-                    runOnUiThread { refreshList() }
+                    runOnUiThread {
+                        categories.removeAll { it.uri == category.uri }
+                        adapter.submitEntries(categories)
+                    }
                 }.start()
             }
             .setNegativeButton("取消", null)
