@@ -48,9 +48,8 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    val note = repository.addNote(name)
+                    repository.addNote(name)
                     refreshList()
-                    openEdit(note)
                 }
             }
             .setNegativeButton("取消", null)
