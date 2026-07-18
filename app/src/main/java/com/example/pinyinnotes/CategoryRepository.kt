@@ -30,4 +30,10 @@ class CategoryRepository(context: Context, treeUri: Uri) {
         val dir = rootDoc.createDirectory(encName) ?: return null
         return Category(name, dir.uri)
     }
+
+    fun renameCategory(context: Context, uri: Uri, newName: String): Category? {
+        val newFolderName = CryptoUtil.encryptToFileName(newName)
+        val newUri = DocStore.rename(context, uri, newFolderName) ?: return null
+        return Category(newName, newUri)
+    }
 }
