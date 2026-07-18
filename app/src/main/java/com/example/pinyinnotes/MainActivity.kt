@@ -43,7 +43,10 @@ class MainActivity : AppCompatActivity() {
 
         val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
         recyclerView.layoutManager = LinearLayoutManager(this)
-        adapter = NoteAdapter { note -> openEdit(note) }
+        adapter = NoteAdapter(
+            onClick = { note -> openEdit(note) },
+            onLongClick = { note -> confirmDelete(note) }
+        )
         recyclerView.adapter = adapter
 
         val fab: ImageButton = findViewById(R.id.fab)
@@ -96,6 +99,18 @@ class MainActivity : AppCompatActivity() {
                     repository?.addNote(name)
                     refreshList()
                 }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun confirmDelete(note: Note) {
+        AlertDialog.Builder(this)
+            .setTitle("删除\u201c${note.name}\u201d")
+            .setMessage("删除后无法恢复，确定吗？")
+            .setPositiveButton("删除") { _, _ ->
+                repository?.deleteNote(note.name)
+                refreshList()
             }
             .setNegativeButton("取消", null)
             .show()
