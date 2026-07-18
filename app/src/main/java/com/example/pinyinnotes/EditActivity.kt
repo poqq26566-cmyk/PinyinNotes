@@ -85,12 +85,12 @@ class EditActivity : AppCompatActivity() {
             editText.movementMethod = LinkMovementMethod.getInstance()
             editText.filters = arrayOf(protectLinkFilter)
             editText.setOnTouchListener(::handleLinkTouch)
-            btnToggleMode.setImageResource(android.R.drawable.ic_menu_edit)
+            btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
         } else {
             editText.filters = arrayOf()
             editText.movementMethod = ArrowKeyMovementMethod.getInstance()
             editText.setOnTouchListener(null)
-            btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
+            btnToggleMode.setImageResource(android.R.drawable.ic_menu_edit)
         }
     }
 
