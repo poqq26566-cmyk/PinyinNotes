@@ -17,13 +17,14 @@ class CategoryActivity : AppCompatActivity() {
 
     private var repository: NoteRepository? = null
     private lateinit var adapter: NoteAdapter<Note>
+    private var categoryUri: Uri = Uri.EMPTY
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         try {
-            val categoryUri = Uri.parse(intent.getStringExtra("category_uri"))
+            categoryUri = Uri.parse(intent.getStringExtra("category_uri"))
             val categoryDoc = DocumentFile.fromTreeUri(this, categoryUri)
                 ?: throw IllegalStateException("无法访问该分类")
             repository = NoteRepository(this, categoryDoc)
@@ -35,6 +36,12 @@ class CategoryActivity : AppCompatActivity() {
                 onLongClick = { note -> showNoteOptions(note) }
             )
             recyclerView.adapter = adapter
+
+            // 有缓存就先秒开显示，后台再刷新真实数据
+            NotesCache.get(categoryUri)?.let {
+                notes = it.toMutableList()
+                adapter.submitEntries(notes)
+            }
 
             val fab: ImageButton = findViewById(R.id.fab)
             fab.setOnClickListener { showAddDialog() }
@@ -62,6 +69,7 @@ class CategoryActivity : AppCompatActivity() {
         val repo = repository ?: return
         Thread {
             val list = repo.getAllNotes()
+            NotesCache.put(categoryUri, list)
             runOnUiThread {
                 notes = list.toMutableList()
                 adapter.submitEntries(notes)
