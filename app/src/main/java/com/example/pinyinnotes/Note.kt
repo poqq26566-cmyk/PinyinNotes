@@ -1,3 +1,5 @@
 package com.example.pinyinnotes
 
-data class Note(val name: String)
+import android.net.Uri
+
+data class Note(val name: String, val uri: Uri)
