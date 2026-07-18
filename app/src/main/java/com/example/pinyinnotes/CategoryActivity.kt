@@ -23,7 +23,7 @@ class CategoryActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         val categoryUri = Uri.parse(intent.getStringExtra("category_uri"))
-        val categoryDoc = DocumentFile.fromSingleUri(this, categoryUri)
+        val categoryDoc = DocumentFile.fromTreeUri(this, categoryUri)
             ?: throw IllegalStateException("无法访问该分类")
         repository = NoteRepository(this, categoryDoc)
 
