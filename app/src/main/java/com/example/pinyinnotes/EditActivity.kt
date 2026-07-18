@@ -37,17 +37,28 @@ class EditActivity : AppCompatActivity() {
             }
         })
 
-        // 只有精准点在链接上才跳转打开，其他地方照常编辑光标定位
+        // 只有精准点在链接文字上才跳转打开，空白区域/其他文字照常编辑
         editText.setOnTouchListener { view, event ->
             if (event.action == MotionEvent.ACTION_UP) {
                 val et = view as EditText
-                val offset = et.getOffsetForPosition(event.x, event.y)
-                val spannable = et.text as? Spannable
-                val spans = spannable?.getSpans(offset, offset, URLSpan::class.java)
-                if (!spans.isNullOrEmpty()) {
-                    val url = spans[0].url
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                    return@setOnTouchListener true
+                val layout = et.layout
+                if (layout != null) {
+                    val y = event.y - et.totalPaddingTop + et.scrollY
+                    val x = event.x - et.totalPaddingLeft + et.scrollX
+
+                    if (y >= 0 && y <= layout.height) {
+                        val line = layout.getLineForVertical(y.toInt())
+                        if (x >= layout.getLineLeft(line) && x <= layout.getLineRight(line)) {
+                            val offset = layout.getOffsetForHorizontal(line, x)
+                            val spannable = et.text as? Spannable
+                            val spans = spannable?.getSpans(offset, offset, URLSpan::class.java)
+                            if (!spans.isNullOrEmpty()) {
+                                val url = spans[0].url
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                                return@setOnTouchListener true
+                            }
+                        }
+                    }
                 }
             }
             false
