@@ -13,10 +13,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
+/** 首页：分类列表，点进分类才能看到里面的笔记 */
 class MainActivity : AppCompatActivity() {
 
-    private var repository: NoteRepository? = null
-    private lateinit var adapter: NoteAdapter
+    private var categoryRepository: CategoryRepository? = null
+    private lateinit var adapter: NoteAdapter<Category>
 
     private val prefs by lazy { getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE) }
 
@@ -30,7 +31,7 @@ class MainActivity : AppCompatActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
             prefs.edit().putString("tree_uri", uri.toString()).apply()
-            repository = NoteRepository(this, uri)
+            categoryRepository = CategoryRepository(this, uri)
             refreshList()
         } else {
             Toast.makeText(this, "需要选择一个文件夹才能使用", Toast.LENGTH_LONG).show()
@@ -44,25 +45,25 @@ class MainActivity : AppCompatActivity() {
         val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
         recyclerView.layoutManager = LinearLayoutManager(this)
         adapter = NoteAdapter(
-            onClick = { note -> openEdit(note) },
-            onLongClick = { note -> confirmDelete(note) }
+            onClick = { category -> openCategory(category) },
+            onLongClick = { category -> confirmDeleteCategory(category) }
         )
         recyclerView.adapter = adapter
 
         val fab: ImageButton = findViewById(R.id.fab)
         fab.setOnClickListener {
-            if (repository == null) pickFolder() else showAddDialog()
+            if (categoryRepository == null) pickFolder() else showAddCategoryDialog()
         }
 
         val savedUri = prefs.getString("tree_uri", null)
         if (savedUri != null) {
             try {
-                repository = NoteRepository(this, Uri.parse(savedUri))
+                categoryRepository = CategoryRepository(this, Uri.parse(savedUri))
             } catch (e: Exception) {
-                repository = null
+                categoryRepository = null
             }
         }
-        if (repository == null) {
+        if (categoryRepository == null) {
             pickFolder()
         }
     }
@@ -84,19 +85,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshList() {
-        repository?.let { adapter.submitNotes(it.getAllNotes()) }
+        categoryRepository?.let { adapter.submitEntries(it.getAllCategories()) }
     }
 
-    private fun showAddDialog() {
+    private fun showAddCategoryDialog() {
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
         val editText = view.findViewById<EditText>(R.id.editName)
         AlertDialog.Builder(this)
-            .setTitle("新建名称")
+            .setTitle("新建分类")
             .setView(view)
             .setPositiveButton("确定") { _, _ ->
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    repository?.addNote(name)
+                    categoryRepository?.addCategory(name)
                     refreshList()
                 }
             }
@@ -104,21 +105,21 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun confirmDelete(note: Note) {
+    private fun confirmDeleteCategory(category: Category) {
         AlertDialog.Builder(this)
-            .setTitle("删除\u201c${note.name}\u201d")
-            .setMessage("删除后无法恢复，确定吗？")
+            .setTitle("删除分类\u201c${category.name}\u201d")
+            .setMessage("分类里的笔记会一起删除，确定吗？")
             .setPositiveButton("删除") { _, _ ->
-                repository?.deleteNote(note.uri)
+                DocStore.delete(this, category.uri)
                 refreshList()
             }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun openEdit(note: Note) {
-        val intent = Intent(this, EditActivity::class.java)
-        intent.putExtra("note_uri", note.uri.toString())
+    private fun openCategory(category: Category) {
+        val intent = Intent(this, CategoryActivity::class.java)
+        intent.putExtra("category_uri", category.uri.toString())
         startActivity(intent)
     }
 }
