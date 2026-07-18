@@ -2,30 +2,44 @@ package com.example.pinyinnotes
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
 import android.view.LayoutInflater
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var repository: NoteRepository
+    private var repository: NoteRepository? = null
     private lateinit var adapter: NoteAdapter
+
+    private val prefs by lazy { getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE) }
+
+    private val folderPicker = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val uri = result.data?.data
+        if (result.resultCode == RESULT_OK && uri != null) {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            prefs.edit().putString("tree_uri", uri.toString()).apply()
+            repository = NoteRepository(this, uri)
+            refreshList()
+        } else {
+            Toast.makeText(this, "需要选择一个文件夹才能使用", Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        requestStoragePermission()
-        repository = NoteRepository(this)
 
         val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -33,7 +47,21 @@ class MainActivity : AppCompatActivity() {
         recyclerView.adapter = adapter
 
         val fab: ImageButton = findViewById(R.id.fab)
-        fab.setOnClickListener { showAddDialog() }
+        fab.setOnClickListener {
+            if (repository == null) pickFolder() else showAddDialog()
+        }
+
+        val savedUri = prefs.getString("tree_uri", null)
+        if (savedUri != null) {
+            try {
+                repository = NoteRepository(this, Uri.parse(savedUri))
+            } catch (e: Exception) {
+                repository = null
+            }
+        }
+        if (repository == null) {
+            pickFolder()
+        }
     }
 
     override fun onResume() {
@@ -41,8 +69,19 @@ class MainActivity : AppCompatActivity() {
         refreshList()
     }
 
+    private fun pickFolder() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        intent.addFlags(
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+        )
+        Toast.makeText(this, "请选择/新建 Vault/拼音笔记 文件夹", Toast.LENGTH_LONG).show()
+        folderPicker.launch(intent)
+    }
+
     private fun refreshList() {
-        adapter.submitNotes(repository.getAllNotes())
+        repository?.let { adapter.submitNotes(it.getAllNotes()) }
     }
 
     private fun showAddDialog() {
@@ -54,31 +93,12 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    repository.addNote(name)
+                    repository?.addNote(name)
                     refreshList()
                 }
             }
             .setNegativeButton("取消", null)
             .show()
-    }
-
-    private fun requestStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                intent.data = Uri.parse("package:$packageName")
-                startActivity(intent)
-            }
-        } else {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(
-                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                    android.Manifest.permission.READ_EXTERNAL_STORAGE
-                ),
-                100
-            )
-        }
     }
 
     private fun openEdit(note: Note) {
