@@ -33,4 +33,10 @@ class NoteRepository(private val context: Context, private val folderDoc: Docume
     fun deleteNote(uri: android.net.Uri) {
         DocStore.delete(context, uri)
     }
+
+    fun renameNote(uri: android.net.Uri, newName: String): Note? {
+        val newFileName = CryptoUtil.encryptToFileName(newName) + EXT
+        val newUri = DocStore.rename(context, uri, newFileName) ?: return null
+        return Note(newName, newUri)
+    }
 }
