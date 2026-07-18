@@ -46,7 +46,7 @@ class MainActivity : AppCompatActivity() {
         recyclerView.layoutManager = LinearLayoutManager(this)
         adapter = NoteAdapter(
             onClick = { category -> openCategory(category) },
-            onLongClick = { category -> confirmDeleteCategory(category) }
+            onLongClick = { category -> showCategoryOptions(category) }
         )
         recyclerView.adapter = adapter
 
@@ -54,6 +54,9 @@ class MainActivity : AppCompatActivity() {
         fab.setOnClickListener {
             if (categoryRepository == null) pickFolder() else showAddCategoryDialog()
         }
+
+        val btnCheckDuplicate: android.widget.Button = findViewById(R.id.btnCheckDuplicate)
+        btnCheckDuplicate.setOnClickListener { checkDuplicates() }
 
         val savedUri = prefs.getString("tree_uri", null)
         if (savedUri != null) {
@@ -149,6 +152,90 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun showCategoryOptions(category: Category) {
+        AlertDialog.Builder(this)
+            .setTitle(category.name)
+            .setItems(arrayOf("重命名", "删除")) { _, which ->
+                when (which) {
+                    0 -> showRenameCategoryDialog(category)
+                    1 -> confirmDeleteCategory(category)
+                }
+            }
+            .show()
+    }
+
+    private fun showRenameCategoryDialog(category: Category) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        editText.setText(category.name)
+        AlertDialog.Builder(this)
+            .setTitle("重命名分类")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isNotEmpty() && newName != category.name) {
+                    val repo = categoryRepository
+                    Thread {
+                        val renamed = repo?.renameCategory(this, category.uri, newName)
+                        runOnUiThread {
+                            if (renamed != null) {
+                                val idx = categories.indexOfFirst { it.uri == category.uri }
+                                if (idx >= 0) {
+                                    categories[idx] = renamed
+                                    categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                    adapter.submitEntries(categories)
+                                }
+                            } else {
+                                Toast.makeText(this, "重命名失败", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }.start()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun checkDuplicates() {
+        Toast.makeText(this, "检测中...", Toast.LENGTH_SHORT).show()
+        val snapshot = categories.toList()
+        Thread {
+            val report = StringBuilder()
+
+            val dupCats = snapshot.groupBy { it.name }.filter { it.value.size > 1 }
+            if (dupCats.isNotEmpty()) {
+                report.append("重复的分类名称：\n")
+                dupCats.keys.forEach { report.append("• $it\n") }
+                report.append("\n")
+            }
+
+            for (category in snapshot) {
+                try {
+                    val folderDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, category.uri)
+                        ?: continue
+                    val noteRepo = NoteRepository(this, folderDoc)
+                    val dupNotes = noteRepo.getAllNotes().groupBy { it.name }.filter { it.value.size > 1 }
+                    if (dupNotes.isNotEmpty()) {
+                        report.append("分类\u201c${category.name}\u201d里重复的笔记名称：\n")
+                        dupNotes.keys.forEach { report.append("• $it\n") }
+                        report.append("\n")
+                    }
+                } catch (e: Exception) {
+                    // 跳过读取失败的分类
+                }
+            }
+
+            val result = if (report.isEmpty()) "没有发现重复名称" else report.toString()
+            runOnUiThread {
+                AlertDialog.Builder(this)
+                    .setTitle("重复名称检测结果")
+                    .setMessage(result)
+                    .setPositiveButton("确定", null)
+                    .show()
+            }
+        }.start()
     }
 
     private fun openCategory(category: Category) {
