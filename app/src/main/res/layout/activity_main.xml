@@ -3,10 +3,26 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerView"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/btnCheckDuplicate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="检测重复名称"
+            android:textAllCaps="false"
+            style="?android:attr/borderlessButtonStyle" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+    </LinearLayout>
 
     <ImageButton
         android:id="@+id/fab"
