@@ -4,11 +4,11 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.EditText
+import android.widget.ImageButton
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 class MainActivity : AppCompatActivity() {
 
@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
         adapter = NoteAdapter { note -> openEdit(note) }
         recyclerView.adapter = adapter
 
-        val fab: FloatingActionButton = findViewById(R.id.fab)
+        val fab: ImageButton = findViewById(R.id.fab)
         fab.setOnClickListener { showAddDialog() }
     }
 
