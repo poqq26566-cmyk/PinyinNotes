@@ -8,31 +8,31 @@ import androidx.recyclerview.widget.RecyclerView
 
 private sealed class ListItem
 private data class HeaderItem(val letter: String) : ListItem()
-private data class NoteListItem(val note: Note) : ListItem()
+private data class EntryListItem<T : NamedItem>(val entry: T) : ListItem()
 
-class NoteAdapter(
-    private val onClick: (Note) -> Unit,
-    private val onLongClick: (Note) -> Unit
+/** 通用列表适配器，按拼音首字母分组，用于分类列表和笔记列表 */
+class NoteAdapter<T : NamedItem>(
+    private val onClick: (T) -> Unit,
+    private val onLongClick: (T) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<ListItem>()
 
     companion object {
         private const val TYPE_HEADER = 0
-        private const val TYPE_NOTE = 1
+        private const val TYPE_ENTRY = 1
     }
 
-    /** 传入按拼音排序好的笔记列表，自动生成 A-Z 分组表头 */
-    fun submitNotes(notes: List<Note>) {
+    fun submitEntries(entries: List<T>) {
         items.clear()
         var lastLetter: String? = null
-        for (note in notes) {
-            val letter = PinyinUtils.getFirstLetter(note.name)
+        for (entry in entries) {
+            val letter = PinyinUtils.getFirstLetter(entry.name)
             if (letter != lastLetter) {
                 items.add(HeaderItem(letter))
                 lastLetter = letter
             }
-            items.add(NoteListItem(note))
+            items.add(EntryListItem(entry))
         }
         notifyDataSetChanged()
     }
@@ -40,7 +40,7 @@ class NoteAdapter(
     override fun getItemViewType(position: Int): Int {
         return when (items[position]) {
             is HeaderItem -> TYPE_HEADER
-            is NoteListItem -> TYPE_NOTE
+            is EntryListItem<*> -> TYPE_ENTRY
         }
     }
 
@@ -49,14 +49,15 @@ class NoteAdapter(
         return if (viewType == TYPE_HEADER) {
             HeaderViewHolder(inflater.inflate(R.layout.item_header, parent, false))
         } else {
-            NoteViewHolder(inflater.inflate(R.layout.item_note, parent, false))
+            EntryViewHolder(inflater.inflate(R.layout.item_note, parent, false))
         }
     }
 
+    @Suppress("UNCHECKED_CAST")
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val item = items[position]) {
             is HeaderItem -> (holder as HeaderViewHolder).bind(item.letter)
-            is NoteListItem -> (holder as NoteViewHolder).bind(item.note, onClick, onLongClick)
+            is EntryListItem<*> -> (holder as EntryViewHolder).bind(item.entry as T, onClick, onLongClick)
         }
     }
 
@@ -69,13 +70,13 @@ class NoteAdapter(
         }
     }
 
-    class NoteViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+    class EntryViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val textView: TextView = itemView.findViewById(R.id.tvName)
-        fun bind(note: Note, onClick: (Note) -> Unit, onLongClick: (Note) -> Unit) {
-            textView.text = note.name
-            itemView.setOnClickListener { onClick(note) }
+        fun <T : NamedItem> bind(entry: T, onClick: (T) -> Unit, onLongClick: (T) -> Unit) {
+            textView.text = entry.name
+            itemView.setOnClickListener { onClick(entry) }
             itemView.setOnLongClickListener {
-                onLongClick(note)
+                onLongClick(entry)
                 true
             }
         }
