@@ -76,12 +76,22 @@ class CategoryActivity : AppCompatActivity() {
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
                     val repo = repository
+
+                    val tempNote = Note(name, Uri.EMPTY)
+                    notes.add(tempNote)
+                    notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                    adapter.submitEntries(notes)
+
                     Thread {
-                        val newNote = repo?.addNote(name)
+                        val realNote = repo?.addNote(name)
                         runOnUiThread {
-                            if (newNote != null) {
-                                notes.add(newNote)
-                                notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                            val idx = notes.indexOfFirst { it === tempNote }
+                            if (idx >= 0) {
+                                if (realNote != null) {
+                                    notes[idx] = realNote
+                                } else {
+                                    notes.removeAt(idx)
+                                }
                                 adapter.submitEntries(notes)
                             }
                         }
@@ -97,13 +107,12 @@ class CategoryActivity : AppCompatActivity() {
             .setTitle("删除\u201c${note.name}\u201d")
             .setMessage("删除后无法恢复，确定吗？")
             .setPositiveButton("删除") { _, _ ->
+                notes.removeAll { it.uri == note.uri }
+                adapter.submitEntries(notes)
+
                 val repo = repository
                 Thread {
                     repo?.deleteNote(note.uri)
-                    runOnUiThread {
-                        notes.removeAll { it.uri == note.uri }
-                        adapter.submitEntries(notes)
-                    }
                 }.start()
             }
             .setNegativeButton("取消", null)
@@ -111,6 +120,10 @@ class CategoryActivity : AppCompatActivity() {
     }
 
     private fun openEdit(note: Note) {
+        if (note.uri == Uri.EMPTY) {
+            android.widget.Toast.makeText(this, "还在创建中，请稍等", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
         val intent = Intent(this, EditActivity::class.java)
         intent.putExtra("note_uri", note.uri.toString())
         startActivity(intent)
