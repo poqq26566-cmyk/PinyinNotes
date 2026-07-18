@@ -1,48 +1,51 @@
 package com.example.pinyinnotes
 
 import android.content.Context
-import android.os.Environment
-import java.io.File
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 
 /**
- * 每条笔记对应一个独立的 .txt 文件，存放在公共目录：
- * /storage/emulated/0/Vault/拼音笔记/名称.txt
- * 文件名即笔记名，内容是纯文本，文件管理器里可直接打开查看，
- * 修改某条笔记只会改动它自己对应的文件。
+ * 使用 SAF（Storage Access Framework）操作用户选定的文件夹。
+ * 不需要"所有文件访问权限"，每条笔记对应文件夹里一个独立的 txt 文件。
  */
-class NoteRepository(context: Context) {
+class NoteRepository(private val context: Context, treeUri: Uri) {
 
-    private val dir: File = run {
-        val d = File(Environment.getExternalStorageDirectory(), "Vault/拼音笔记")
-        if (!d.exists()) d.mkdirs()
-        d
-    }
+    private val rootDoc: DocumentFile =
+        DocumentFile.fromTreeUri(context, treeUri)
+            ?: throw IllegalStateException("无法访问所选文件夹")
 
     fun getAllNotes(): List<Note> {
-        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".txt") } ?: emptyArray()
-        return files
-            .map { Note(it.name.removeSuffix(".txt")) }
+        return rootDoc.listFiles()
+            .filter { it.isFile && it.name?.endsWith(".txt") == true }
+            .map { Note(it.name!!.removeSuffix(".txt")) }
             .sortedWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
     }
 
     fun addNote(name: String): Note {
         val safeName = sanitize(name)
-        val file = File(dir, "$safeName.txt")
-        if (!file.exists()) file.writeText("")
+        if (rootDoc.findFile("$safeName.txt") == null) {
+            rootDoc.createFile("text/plain", safeName)
+        }
         return Note(safeName)
     }
 
     fun getNoteContent(name: String): String {
-        val file = File(dir, "$name.txt")
-        return if (file.exists()) file.readText() else ""
+        val file = rootDoc.findFile("$name.txt") ?: return ""
+        val input = context.contentResolver.openInputStream(file.uri) ?: return ""
+        return input.bufferedReader().use { it.readText() }
     }
 
     fun updateNoteContent(name: String, content: String) {
-        File(dir, "$name.txt").writeText(content)
+        val file = rootDoc.findFile("$name.txt")
+            ?: rootDoc.createFile("text/plain", name)
+            ?: return
+        context.contentResolver.openOutputStream(file.uri, "wt")?.use {
+            it.write(content.toByteArray())
+        }
     }
 
     fun deleteNote(name: String) {
-        File(dir, "$name.txt").delete()
+        rootDoc.findFile("$name.txt")?.delete()
     }
 
     /** 过滤安卓文件名不允许的字符 */
