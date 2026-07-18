@@ -32,12 +32,15 @@ class CategoryActivity : AppCompatActivity() {
             recyclerView.layoutManager = LinearLayoutManager(this)
             adapter = NoteAdapter(
                 onClick = { note -> openEdit(note) },
-                onLongClick = { note -> confirmDelete(note) }
+                onLongClick = { note -> showNoteOptions(note) }
             )
             recyclerView.adapter = adapter
 
             val fab: ImageButton = findViewById(R.id.fab)
             fab.setOnClickListener { showAddDialog() }
+
+            val btnCheckDuplicate: android.widget.Button = findViewById(R.id.btnCheckDuplicate)
+            btnCheckDuplicate.setOnClickListener { checkDuplicates() }
         } catch (e: Exception) {
             AlertDialog.Builder(this)
                 .setTitle("出错了")
@@ -116,6 +119,67 @@ class CategoryActivity : AppCompatActivity() {
                 }.start()
             }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showNoteOptions(note: Note) {
+        AlertDialog.Builder(this)
+            .setTitle(note.name)
+            .setItems(arrayOf("重命名", "删除")) { _, which ->
+                when (which) {
+                    0 -> showRenameNoteDialog(note)
+                    1 -> confirmDelete(note)
+                }
+            }
+            .show()
+    }
+
+    private fun showRenameNoteDialog(note: Note) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        editText.setText(note.name)
+        AlertDialog.Builder(this)
+            .setTitle("重命名")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isNotEmpty() && newName != note.name) {
+                    val repo = repository
+                    Thread {
+                        val renamed = repo?.renameNote(note.uri, newName)
+                        runOnUiThread {
+                            if (renamed != null) {
+                                val idx = notes.indexOfFirst { it.uri == note.uri }
+                                if (idx >= 0) {
+                                    notes[idx] = renamed
+                                    notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                    adapter.submitEntries(notes)
+                                }
+                            } else {
+                                android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }.start()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun checkDuplicates() {
+        val dups = notes.groupBy { it.name }.filter { it.value.size > 1 }
+        val result = if (dups.isEmpty()) {
+            "没有发现重复名称"
+        } else {
+            buildString {
+                append("重复的笔记名称：\n")
+                dups.keys.forEach { append("• $it\n") }
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("重复名称检测结果")
+            .setMessage(result)
+            .setPositiveButton("确定", null)
             .show()
     }
 
