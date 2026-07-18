@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("删除\u201c${note.name}\u201d")
             .setMessage("删除后无法恢复，确定吗？")
             .setPositiveButton("删除") { _, _ ->
-                repository?.deleteNote(note.name)
+                repository?.deleteNote(note.uri)
                 refreshList()
             }
             .setNegativeButton("取消", null)
@@ -118,7 +118,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openEdit(note: Note) {
         val intent = Intent(this, EditActivity::class.java)
-        intent.putExtra("note_name", note.name)
+        intent.putExtra("note_uri", note.uri.toString())
         startActivity(intent)
     }
 }
