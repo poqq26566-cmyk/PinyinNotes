@@ -107,12 +107,23 @@ class MainActivity : AppCompatActivity() {
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
                     val repo = categoryRepository
+
+                    // 乐观更新：立刻显示在列表里，不等磁盘真正写完
+                    val tempCategory = Category(name, Uri.EMPTY)
+                    categories.add(tempCategory)
+                    categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                    adapter.submitEntries(categories)
+
                     Thread {
-                        val newCategory = repo?.addCategory(name)
+                        val realCategory = repo?.addCategory(name)
                         runOnUiThread {
-                            if (newCategory != null) {
-                                categories.add(newCategory)
-                                categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                            val idx = categories.indexOfFirst { it === tempCategory }
+                            if (idx >= 0) {
+                                if (realCategory != null) {
+                                    categories[idx] = realCategory
+                                } else {
+                                    categories.removeAt(idx)
+                                }
                                 adapter.submitEntries(categories)
                             }
                         }
@@ -128,12 +139,12 @@ class MainActivity : AppCompatActivity() {
             .setTitle("删除分类\u201c${category.name}\u201d")
             .setMessage("分类里的笔记会一起删除，确定吗？")
             .setPositiveButton("删除") { _, _ ->
+                // 乐观更新：立刻从列表移除
+                categories.removeAll { it.uri == category.uri }
+                adapter.submitEntries(categories)
+
                 Thread {
                     DocStore.delete(this, category.uri)
-                    runOnUiThread {
-                        categories.removeAll { it.uri == category.uri }
-                        adapter.submitEntries(categories)
-                    }
                 }.start()
             }
             .setNegativeButton("取消", null)
@@ -141,6 +152,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openCategory(category: Category) {
+        if (category.uri == Uri.EMPTY) {
+            Toast.makeText(this, "还在创建中，请稍等", Toast.LENGTH_SHORT).show()
+            return
+        }
         val intent = Intent(this, CategoryActivity::class.java)
         intent.putExtra("category_uri", category.uri.toString())
         startActivity(intent)
