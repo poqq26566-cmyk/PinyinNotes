@@ -15,28 +15,37 @@ import androidx.recyclerview.widget.RecyclerView
 /** 分类内页：显示该分类下的笔记，按拼音 A-Z 分组 */
 class CategoryActivity : AppCompatActivity() {
 
-    private lateinit var repository: NoteRepository
+    private var repository: NoteRepository? = null
     private lateinit var adapter: NoteAdapter<Note>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val categoryUri = Uri.parse(intent.getStringExtra("category_uri"))
-        val categoryDoc = DocumentFile.fromTreeUri(this, categoryUri)
-            ?: throw IllegalStateException("无法访问该分类")
-        repository = NoteRepository(this, categoryDoc)
+        try {
+            val categoryUri = Uri.parse(intent.getStringExtra("category_uri"))
+            val categoryDoc = DocumentFile.fromTreeUri(this, categoryUri)
+                ?: throw IllegalStateException("无法访问该分类")
+            repository = NoteRepository(this, categoryDoc)
 
-        val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
-        recyclerView.layoutManager = LinearLayoutManager(this)
-        adapter = NoteAdapter(
-            onClick = { note -> openEdit(note) },
-            onLongClick = { note -> confirmDelete(note) }
-        )
-        recyclerView.adapter = adapter
+            val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
+            recyclerView.layoutManager = LinearLayoutManager(this)
+            adapter = NoteAdapter(
+                onClick = { note -> openEdit(note) },
+                onLongClick = { note -> confirmDelete(note) }
+            )
+            recyclerView.adapter = adapter
 
-        val fab: ImageButton = findViewById(R.id.fab)
-        fab.setOnClickListener { showAddDialog() }
+            val fab: ImageButton = findViewById(R.id.fab)
+            fab.setOnClickListener { showAddDialog() }
+        } catch (e: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("出错了")
+                .setMessage(e.toString() + "\n\n" + e.stackTraceToString().take(1000))
+                .setPositiveButton("确定") { _, _ -> finish() }
+                .setCancelable(false)
+                .show()
+        }
     }
 
     override fun onResume() {
@@ -45,7 +54,11 @@ class CategoryActivity : AppCompatActivity() {
     }
 
     private fun refreshList() {
-        adapter.submitEntries(repository.getAllNotes())
+        val repo = repository ?: return
+        Thread {
+            val list = repo.getAllNotes()
+            runOnUiThread { adapter.submitEntries(list) }
+        }.start()
     }
 
     private fun showAddDialog() {
@@ -57,8 +70,11 @@ class CategoryActivity : AppCompatActivity() {
             .setPositiveButton("确定") { _, _ ->
                 val name = editText.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    repository.addNote(name)
-                    refreshList()
+                    val repo = repository
+                    Thread {
+                        repo?.addNote(name)
+                        runOnUiThread { refreshList() }
+                    }.start()
                 }
             }
             .setNegativeButton("取消", null)
@@ -70,8 +86,11 @@ class CategoryActivity : AppCompatActivity() {
             .setTitle("删除\u201c${note.name}\u201d")
             .setMessage("删除后无法恢复，确定吗？")
             .setPositiveButton("删除") { _, _ ->
-                repository.deleteNote(note.uri)
-                refreshList()
+                val repo = repository
+                Thread {
+                    repo?.deleteNote(note.uri)
+                    runOnUiThread { refreshList() }
+                }.start()
             }
             .setNegativeButton("取消", null)
             .show()
