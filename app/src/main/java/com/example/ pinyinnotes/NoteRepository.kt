@@ -1,77 +1,52 @@
 package com.example.pinyinnotes
 
 import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
+import android.os.Environment
 import java.io.File
 
 /**
- * 使用本地 JSON 文件持久化，无需数据库依赖，简单可靠。
+ * 每条笔记对应一个独立的 .txt 文件，存放在公共目录：
+ * /storage/emulated/0/Vault/拼音笔记/名称.txt
+ * 文件名即笔记名，内容是纯文本，文件管理器里可直接打开查看，
+ * 修改某条笔记只会改动它自己对应的文件。
  */
 class NoteRepository(context: Context) {
 
-    private val file = File(context.filesDir, "notes.json")
+    private val dir: File = run {
+        val d = File(Environment.getExternalStorageDirectory(), "Vault/拼音笔记")
+        if (!d.exists()) d.mkdirs()
+        d
+    }
 
-    /** 获取全部笔记，按拼音首字母 + 名称排序 */
     fun getAllNotes(): List<Note> {
-        return getAllNotesRaw().sortedWith(
-            compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name })
-        )
+        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".txt") } ?: emptyArray()
+        return files
+            .map { Note(it.name.removeSuffix(".txt")) }
+            .sortedWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
     }
 
     fun addNote(name: String): Note {
-        val notes = getAllNotesRaw().toMutableList()
-        val newId = (notes.maxOfOrNull { it.id } ?: 0L) + 1
-        val note = Note(id = newId, name = name, content = "")
-        notes.add(note)
-        saveAll(notes)
-        return note
+        val safeName = sanitize(name)
+        val file = File(dir, "$safeName.txt")
+        if (!file.exists()) file.writeText("")
+        return Note(safeName)
     }
 
-    fun getNoteById(id: Long): Note? = getAllNotesRaw().find { it.id == id }
-
-    fun updateNoteContent(id: Long, content: String) {
-        val notes = getAllNotesRaw().toMutableList()
-        val index = notes.indexOfFirst { it.id == id }
-        if (index >= 0) {
-            notes[index] = notes[index].copy(content = content)
-            saveAll(notes)
-        }
+    fun getNoteContent(name: String): String {
+        val file = File(dir, "$name.txt")
+        return if (file.exists()) file.readText() else ""
     }
 
-    fun deleteNote(id: Long) {
-        val notes = getAllNotesRaw().filter { it.id != id }
-        saveAll(notes)
+    fun updateNoteContent(name: String, content: String) {
+        File(dir, "$name.txt").writeText(content)
     }
 
-    private fun getAllNotesRaw(): List<Note> {
-        if (!file.exists()) return emptyList()
-        val text = file.readText()
-        if (text.isBlank()) return emptyList()
-        val arr = JSONArray(text)
-        val list = mutableListOf<Note>()
-        for (i in 0 until arr.length()) {
-            val obj = arr.getJSONObject(i)
-            list.add(
-                Note(
-                    id = obj.getLong("id"),
-                    name = obj.getString("name"),
-                    content = obj.optString("content", "")
-                )
-            )
-        }
-        return list
+    fun deleteNote(name: String) {
+        File(dir, "$name.txt").delete()
     }
 
-    private fun saveAll(notes: List<Note>) {
-        val arr = JSONArray()
-        for (note in notes) {
-            val obj = JSONObject()
-            obj.put("id", note.id)
-            obj.put("name", note.name)
-            obj.put("content", note.content)
-            arr.put(obj)
-        }
-        file.writeText(arr.toString())
+    /** 过滤安卓文件名不允许的字符 */
+    private fun sanitize(name: String): String {
+        return name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
     }
 }
