@@ -53,11 +53,16 @@ class CategoryActivity : AppCompatActivity() {
         refreshList()
     }
 
+    private var notes = mutableListOf<Note>()
+
     private fun refreshList() {
         val repo = repository ?: return
         Thread {
             val list = repo.getAllNotes()
-            runOnUiThread { adapter.submitEntries(list) }
+            runOnUiThread {
+                notes = list.toMutableList()
+                adapter.submitEntries(notes)
+            }
         }.start()
     }
 
@@ -72,8 +77,14 @@ class CategoryActivity : AppCompatActivity() {
                 if (name.isNotEmpty()) {
                     val repo = repository
                     Thread {
-                        repo?.addNote(name)
-                        runOnUiThread { refreshList() }
+                        val newNote = repo?.addNote(name)
+                        runOnUiThread {
+                            if (newNote != null) {
+                                notes.add(newNote)
+                                notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                adapter.submitEntries(notes)
+                            }
+                        }
                     }.start()
                 }
             }
@@ -89,7 +100,10 @@ class CategoryActivity : AppCompatActivity() {
                 val repo = repository
                 Thread {
                     repo?.deleteNote(note.uri)
-                    runOnUiThread { refreshList() }
+                    runOnUiThread {
+                        notes.removeAll { it.uri == note.uri }
+                        adapter.submitEntries(notes)
+                    }
                 }.start()
             }
             .setNegativeButton("取消", null)
