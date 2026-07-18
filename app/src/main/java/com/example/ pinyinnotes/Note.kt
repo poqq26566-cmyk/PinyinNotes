@@ -1,7 +1,3 @@
 package com.example.pinyinnotes
 
-data class Note(
-    val id: Long,
-    var name: String,
-    var content: String = ""
-)
+data class Note(val name: String
