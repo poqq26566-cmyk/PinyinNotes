@@ -10,8 +10,10 @@ private sealed class ListItem
 private data class HeaderItem(val letter: String) : ListItem()
 private data class NoteListItem(val note: Note) : ListItem()
 
-class NoteAdapter(private val onClick: (Note) -> Unit) :
-    RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+class NoteAdapter(
+    private val onClick: (Note) -> Unit,
+    private val onLongClick: (Note) -> Unit
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<ListItem>()
 
@@ -54,7 +56,7 @@ class NoteAdapter(private val onClick: (Note) -> Unit) :
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val item = items[position]) {
             is HeaderItem -> (holder as HeaderViewHolder).bind(item.letter)
-            is NoteListItem -> (holder as NoteViewHolder).bind(item.note, onClick)
+            is NoteListItem -> (holder as NoteViewHolder).bind(item.note, onClick, onLongClick)
         }
     }
 
@@ -69,9 +71,13 @@ class NoteAdapter(private val onClick: (Note) -> Unit) :
 
     class NoteViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val textView: TextView = itemView.findViewById(R.id.tvName)
-        fun bind(note: Note, onClick: (Note) -> Unit) {
+        fun bind(note: Note, onClick: (Note) -> Unit, onLongClick: (Note) -> Unit) {
             textView.text = note.name
             itemView.setOnClickListener { onClick(note) }
+            itemView.setOnLongClickListener {
+                onLongClick(note)
+                true
+            }
         }
     }
-    }
+}
