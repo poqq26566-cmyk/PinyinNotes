@@ -21,9 +21,9 @@ object LetterIndexBarHelper {
         LETTERS.forEach { letter ->
             val tv = TextView(container.context)
             tv.text = letter
-            tv.textSize = 11f
+            tv.textSize = 14f
             tv.gravity = Gravity.CENTER
-            tv.setPadding(2, 2, 2, 2)
+            tv.setPadding(4, 6, 4, 6)
             container.addView(tv)
         }
 
