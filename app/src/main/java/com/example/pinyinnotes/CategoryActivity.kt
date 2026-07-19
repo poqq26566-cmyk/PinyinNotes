@@ -133,35 +133,22 @@ class CategoryActivity : AppCompatActivity() {
     private fun showNoteOptions(note: Note) {
         AlertDialog.Builder(this)
             .setTitle(note.name)
-            .setItems(arrayOf("重命名", "复制", "删除")) { _, which ->
+            .setItems(arrayOf("重命名", "复制名称", "删除")) { _, which ->
                 when (which) {
                     0 -> showRenameNoteDialog(note)
-                    1 -> copyNoteContent(note)
+                    1 -> copyNoteName(note)
                     2 -> confirmDelete(note)
                 }
             }
             .show()
     }
 
-    private fun copyNoteContent(note: Note) {
-        Thread {
-            val content = DocStore.getContent(this, note.uri)
-            runOnUiThread {
-                // ✅ 修复：content 为空时提示用户，不写入剪贴板
-                if (content.isEmpty()) {
-                    android.widget.Toast.makeText(
-                        this,
-                        "内容为空，无法复制",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                    return@runOnUiThread
-                }
-                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText(note.name, content)
-                clipboard.setPrimaryClip(clip)
-                android.widget.Toast.makeText(this, "已复制到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }.start()
+    // ✅ 修复：直接复制笔记名称，不读取文件内容
+    private fun copyNoteName(note: Note) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("note_name", note.name)
+        clipboard.setPrimaryClip(clip)
+        android.widget.Toast.makeText(this, "已复制：${note.name}", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun showRenameNoteDialog(note: Note) {
