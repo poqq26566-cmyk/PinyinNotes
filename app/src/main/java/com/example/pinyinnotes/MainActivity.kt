@@ -180,14 +180,15 @@ class MainActivity : AppCompatActivity() {
                     val idx = categories.indexOfFirst { it.uri == category.uri }
                     if (idx >= 0) {
                         val oldCategory = categories[idx]
-                        categories[idx] = Category(newName, oldCategory.uri)
+                        val tempCategory = Category(newName, Uri.EMPTY)
+                        categories[idx] = tempCategory
                         categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
                         adapter.submitEntries(categories)
 
                         Thread {
                             val renamed = repo?.renameCategory(this, oldCategory.uri, newName)
                             runOnUiThread {
-                                val curIdx = categories.indexOfFirst { it.uri == oldCategory.uri }
+                                val curIdx = categories.indexOfFirst { it === tempCategory }
                                 if (renamed != null) {
                                     if (curIdx >= 0) categories[curIdx] = renamed
                                 } else {
@@ -247,7 +248,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openCategory(category: Category) {
         if (category.uri == Uri.EMPTY) {
-            Toast.makeText(this, "还在创建中，请稍等", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "正在处理，请稍等", Toast.LENGTH_SHORT).show()
             return
         }
         val intent = Intent(this, CategoryActivity::class.java)
