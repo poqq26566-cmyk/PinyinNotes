@@ -147,6 +147,15 @@ class CategoryActivity : AppCompatActivity() {
         Thread {
             val content = DocStore.getContent(this, note.uri)
             runOnUiThread {
+                // ✅ 修复：content 为空时提示用户，不写入剪贴板
+                if (content.isEmpty()) {
+                    android.widget.Toast.makeText(
+                        this,
+                        "内容为空，无法复制",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    return@runOnUiThread
+                }
                 val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 val clip = android.content.ClipData.newPlainText(note.name, content)
                 clipboard.setPrimaryClip(clip)
