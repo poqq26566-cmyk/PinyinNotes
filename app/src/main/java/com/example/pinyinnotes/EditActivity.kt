@@ -1,6 +1,7 @@
 package com.example.pinyinnotes
 
 import android.content.Intent
+import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
@@ -10,13 +11,17 @@ import android.text.Spanned
 import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
 import android.text.method.LinkMovementMethod
-import android.text.method.TextKeyListener
 import android.text.style.URLSpan
 import android.text.util.Linkify
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 
 /**
  * 全屏空白编辑页，内容自动加密保存。
@@ -24,12 +29,15 @@ import androidx.appcompat.app.AppCompatActivity
  * - 编辑模式：完全自由编辑，链接不高亮、点哪都只是定位光标
  * - 阅读模式：其他内容照样能改，也能新增链接，但已生成的链接文字本身
  *             不能被修改或删除；点击链接直接跳转打开
+ * 另有"选择默认打开App"按钮：点击链接时用指定的App打开，
+ * 每条笔记各自独立记住自己的选择，可随时重新选择更换。
  */
 class EditActivity : AppCompatActivity() {
 
     private lateinit var noteUri: Uri
     private lateinit var editText: EditText
     private lateinit var btnToggleMode: ImageButton
+    private lateinit var btnChooseApp: ImageButton
     private var isReadMode = false
 
     /** 阻止对已有链接文字的修改/删除，其余内容不受影响 */
@@ -40,7 +48,6 @@ class EditActivity : AppCompatActivity() {
             val spanStart = dest.getSpanStart(span)
             val spanEnd = dest.getSpanEnd(span)
             if (dstart < spanEnd && dend > spanStart) {
-                // 这次编辑碰到了已有链接的字符范围，原样放回去，等于不允许改
                 return@InputFilter dest.subSequence(dstart, dend)
             }
         }
@@ -55,6 +62,7 @@ class EditActivity : AppCompatActivity() {
 
         editText = findViewById(R.id.editContent)
         btnToggleMode = findViewById(R.id.btnToggleMode)
+        btnChooseApp = findViewById(R.id.btnChooseApp)
 
         editText.setText(DocStore.getContent(this, noteUri))
 
@@ -64,7 +72,6 @@ class EditActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {
                 DocStore.setContent(this@EditActivity, noteUri, s.toString())
                 if (isReadMode) {
-                    // 识别新出现的链接，让它们也变成受保护、可点击的链接
                     Linkify.addLinks(editText, Linkify.WEB_URLS)
                 }
             }
@@ -74,6 +81,8 @@ class EditActivity : AppCompatActivity() {
             isReadMode = !isReadMode
             applyMode()
         }
+
+        btnChooseApp.setOnClickListener { showAppPickerDialog() }
 
         applyMode()
         editText.requestFocus()
@@ -94,7 +103,6 @@ class EditActivity : AppCompatActivity() {
         }
     }
 
-    /** 只有精准点在链接文字上才跳转打开，其他地方交给正常的编辑/光标定位逻辑 */
     private fun handleLinkTouch(view: android.view.View, event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_UP) {
             val et = view as EditText
@@ -109,7 +117,7 @@ class EditActivity : AppCompatActivity() {
                         val spannable = et.text as? Spannable
                         val spans = spannable?.getSpans(offset, offset, URLSpan::class.java)
                         if (!spans.isNullOrEmpty()) {
-                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(spans[0].url)))
+                            openLink(spans[0].url)
                             return true
                         }
                     }
@@ -117,5 +125,80 @@ class EditActivity : AppCompatActivity() {
             }
         }
         return false
+    }
+
+    /** 有记住的默认App就用它打开，没有就走系统默认方式 */
+    private fun openLink(url: String) {
+        val preferredPackage = LinkAppPreference.get(this, noteUri)
+        if (preferredPackage != null) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            intent.setPackage(preferredPackage)
+            try {
+                startActivity(intent)
+                return
+            } catch (e: Exception) {
+                val launchIntent = packageManager.getLaunchIntentForPackage(preferredPackage)
+                if (launchIntent != null) {
+                    startActivity(launchIntent)
+                    return
+                }
+            }
+        }
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    private fun showAppPickerDialog() {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
+        val editSearch = view.findViewById<EditText>(R.id.editSearchApp)
+        val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerApps)
+        recyclerView.layoutManager = LinearLayoutManager(this)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("选择默认打开App")
+            .setView(view)
+            .setNegativeButton("取消", null)
+            .setNeutralButton("清除选择") { _, _ ->
+                LinkAppPreference.clear(this, noteUri)
+                Toast.makeText(this, "已恢复系统默认方式", Toast.LENGTH_SHORT).show()
+            }
+            .create()
+
+        Thread {
+            val apps = loadInstalledApps()
+            runOnUiThread {
+                val adapter = AppListAdapter(apps) { entry ->
+                    LinkAppPreference.set(this, noteUri, entry.packageName)
+                    Toast.makeText(this, "已设为默认：${entry.label}", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }
+                recyclerView.adapter = adapter
+                editSearch.addTextChangedListener(object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                        adapter.filter(s?.toString() ?: "")
+                    }
+                    override fun afterTextChanged(s: Editable?) {}
+                })
+            }
+        }.start()
+
+        dialog.show()
+    }
+
+    private fun loadInstalledApps(): List<AppEntry> {
+        val mainIntent = Intent(Intent.ACTION_MAIN, null)
+        mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
+        val resolveInfos: List<ResolveInfo> = packageManager.queryIntentActivities(mainIntent, 0)
+
+        return resolveInfos
+            .map { info ->
+                AppEntry(
+                    label = info.loadLabel(packageManager).toString(),
+                    packageName = info.activityInfo.packageName,
+                    icon = info.loadIcon(packageManager)
+                )
+            }
+            .distinctBy { it.packageName }
+            .sortedWith(compareBy({ PinyinUtils.getFirstLetter(it.label) }, { it.label }))
     }
 }
