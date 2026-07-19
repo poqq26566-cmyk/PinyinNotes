@@ -184,6 +184,7 @@ class CategoryActivity : AppCompatActivity() {
                             }
                         }.start()
                     }
+                }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -215,4 +216,4 @@ class CategoryActivity : AppCompatActivity() {
         intent.putExtra("note_uri", note.uri.toString())
         startActivity(intent)
     }
-    }
+}
