@@ -136,44 +136,21 @@ class CategoryActivity : AppCompatActivity() {
             .setItems(arrayOf("重命名", "复制", "删除")) { _, which ->
                 when (which) {
                     0 -> showRenameNoteDialog(note)
-                    1 -> copyNote(note)
+                    1 -> copyNoteContent(note)
                     2 -> confirmDelete(note)
                 }
             }
             .show()
     }
 
-    private fun copyNote(note: Note) {
-        var newName = "${note.name} 副本"
-        var suffix = 2
-        val existingNames = notes.map { it.name }.toMutableSet()
-        while (existingNames.contains(newName)) {
-            newName = "${note.name} 副本($suffix)"
-            suffix++
-        }
-
-        val repo = repository ?: return
-        val tempNote = Note(newName, Uri.EMPTY)
-        notes.add(tempNote)
-        notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-        adapter.submitEntries(notes)
-
+    private fun copyNoteContent(note: Note) {
         Thread {
             val content = DocStore.getContent(this, note.uri)
-            val realNote = repo.addNote(newName)
-            if (realNote != null) {
-                DocStore.setContent(this, realNote.uri, content)
-            }
             runOnUiThread {
-                val idx = notes.indexOfFirst { it === tempNote }
-                if (idx >= 0) {
-                    if (realNote != null) {
-                        notes[idx] = realNote
-                    } else {
-                        notes.removeAt(idx)
-                    }
-                    adapter.submitEntries(notes)
-                }
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = android.content.ClipData.newPlainText(note.name, content)
+                clipboard.setPrimaryClip(clip)
+                android.widget.Toast.makeText(this, "已复制到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
             }
         }.start()
     }
