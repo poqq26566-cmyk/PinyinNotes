@@ -198,6 +198,7 @@ class EditActivity : AppCompatActivity() {
                     icon = info.loadIcon(packageManager)
                 )
             }
+            .filter { it.packageName != packageName }
             .distinctBy { it.packageName }
             .sortedWith(compareBy({ PinyinUtils.getFirstLetter(it.label) }, { it.label }))
     }
