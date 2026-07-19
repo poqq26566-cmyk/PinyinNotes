@@ -77,57 +77,41 @@ class CategoryActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun showRenameNoteDialog(note: Note) {
-    val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
-    val editText = view.findViewById<EditText>(R.id.editName)
-    editText.setText(note.name)
-    AlertDialog.Builder(this)
-        .setTitle("重命名")
-        .setView(view)
-        .setPositiveButton("确定") { _, _ ->
-            val newName = editText.text.toString().trim()
-            if (newName.isNotEmpty() && newName != note.name) {
-                val repo = repository
+    private fun showAddDialog() {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        AlertDialog.Builder(this)
+            .setTitle("新建名称")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val name = editText.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val repo = repository
 
-                // ✅ 第一步：立即乐观更新 UI，先用旧 uri 占位，名字换成新名字
-                val idx = notes.indexOfFirst { it.uri == note.uri }
-                if (idx >= 0) {
-                    notes[idx] = Note(newName, note.uri) // 占位，uri 暂时不变
+                    val tempNote = Note(name, Uri.EMPTY)
+                    notes.add(tempNote)
                     notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
                     adapter.submitEntries(notes)
-                }
 
-                // ✅ 第二步：后台执行真正的重命名
-                Thread {
-                    val renamed = repo?.renameNote(note.uri, newName)
-                    runOnUiThread {
-                        if (renamed != null) {
-                            // 成功：用真实的新 uri 替换占位条目
-                            val newIdx = notes.indexOfFirst { it.uri == note.uri }
-                            if (newIdx >= 0) {
-                                notes[newIdx] = renamed
+                    Thread {
+                        val realNote = repo?.addNote(name)
+                        runOnUiThread {
+                            val idx = notes.indexOfFirst { it === tempNote }
+                            if (idx >= 0) {
+                                if (realNote != null) {
+                                    notes[idx] = realNote
+                                } else {
+                                    notes.removeAt(idx)
+                                }
                                 adapter.submitEntries(notes)
                             }
-                        } else {
-                            // 失败：回滚 UI，还原旧名字
-                            val newIdx = notes.indexOfFirst { it.uri == note.uri }
-                            if (newIdx >= 0) {
-                                notes[newIdx] = note
-                            } else {
-                                notes.add(note)
-                            }
-                            notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                            adapter.submitEntries(notes)
-                            android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
                         }
-                    }
-                }.start()
+                    }.start()
+                }
             }
-        }
-        .setNegativeButton("取消", null)
-        .show()
-}
-
+            .setNegativeButton("取消", null)
+            .show()
+    }
 
     private fun confirmDelete(note: Note) {
         AlertDialog.Builder(this)
