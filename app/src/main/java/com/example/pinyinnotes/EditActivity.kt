@@ -17,21 +17,14 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ProgressBar   // ✅ 新增
 import android.widget.Toast
+import android.view.View             // ✅ 新增
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
-/**
- * 全屏空白编辑页，内容自动加密保存。
- * 右下角按钮切换 编辑模式 / 阅读模式：
- * - 编辑模式：完全自由编辑，链接不高亮、点哪都只是定位光标
- * - 阅读模式：其他内容照样能改，也能新增链接，但已生成的链接文字本身
- *             不能被修改或删除；点击链接直接跳转打开
- * 另有"选择默认打开App"按钮：点击链接时用指定的App打开，
- * 每条笔记各自独立记住自己的选择，可随时重新选择更换。
- */
 class EditActivity : AppCompatActivity() {
 
     private lateinit var noteUri: Uri
@@ -40,7 +33,12 @@ class EditActivity : AppCompatActivity() {
     private lateinit var btnChooseApp: ImageButton
     private var isReadMode = false
 
-    /** 阻止对已有链接文字的修改/删除，其余内容不受影响 */
+    // ✅ 修复1：应用列表全局缓存，整个App生命周期只加载一次图标
+    companion object {
+        @Volatile
+        private var cachedApps: List<AppEntry>? = null
+    }
+
     private val protectLinkFilter = InputFilter { _, _, _, dest, dstart, dend ->
         if (dest !is Spanned) return@InputFilter null
         val spans = dest.getSpans(0, dest.length, URLSpan::class.java)
@@ -64,7 +62,14 @@ class EditActivity : AppCompatActivity() {
         btnToggleMode = findViewById(R.id.btnToggleMode)
         btnChooseApp = findViewById(R.id.btnChooseApp)
 
-        editText.setText(DocStore.getContent(this, noteUri))
+        // ✅ 修复2：内容读取（含解密）移到子线程，避免卡住主线程
+        Thread {
+            val content = DocStore.getContent(this, noteUri)
+            runOnUiThread {
+                editText.setText(content)
+                editText.requestFocus()
+            }
+        }.start()
 
         editText.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -85,7 +90,6 @@ class EditActivity : AppCompatActivity() {
         btnChooseApp.setOnClickListener { showAppPickerDialog() }
 
         applyMode()
-        editText.requestFocus()
     }
 
     private fun applyMode() {
@@ -127,7 +131,6 @@ class EditActivity : AppCompatActivity() {
         return false
     }
 
-    /** 有记住的默认App就用它打开，没有就走系统默认方式 */
     private fun openLink(url: String) {
         val preferredPackage = LinkAppPreference.get(this, noteUri)
         if (preferredPackage != null) {
@@ -151,6 +154,8 @@ class EditActivity : AppCompatActivity() {
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
         val editSearch = view.findViewById<EditText>(R.id.editSearchApp)
         val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerApps)
+        // ✅ 修复3：加载时显示进度条，给用户反馈
+        val progressBar = view.findViewById<ProgressBar>(R.id.progressBarApps)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
         val dialog = AlertDialog.Builder(this)
@@ -163,26 +168,46 @@ class EditActivity : AppCompatActivity() {
             }
             .create()
 
-        Thread {
-            val apps = loadInstalledApps()
-            runOnUiThread {
-                val adapter = AppListAdapter(apps) { entry ->
-                    LinkAppPreference.set(this, noteUri, entry.packageName)
-                    Toast.makeText(this, "已设为默认：${entry.label}", Toast.LENGTH_SHORT).show()
-                    dialog.dismiss()
+        // ✅ 修复4：有缓存直接用，无需等待
+        val cached = cachedApps
+        if (cached != null) {
+            progressBar?.visibility = View.GONE
+            setupAppAdapter(cached, recyclerView, editSearch, dialog)
+        } else {
+            progressBar?.visibility = View.VISIBLE
+            Thread {
+                val apps = loadInstalledApps()
+                cachedApps = apps  // 写入缓存
+                runOnUiThread {
+                    progressBar?.visibility = View.GONE
+                    setupAppAdapter(apps, recyclerView, editSearch, dialog)
                 }
-                recyclerView.adapter = adapter
-                editSearch.addTextChangedListener(object : TextWatcher {
-                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                        adapter.filter(s?.toString() ?: "")
-                    }
-                    override fun afterTextChanged(s: Editable?) {}
-                })
-            }
-        }.start()
+            }.start()
+        }
 
         dialog.show()
+    }
+
+    // ✅ 抽取公共方法，避免重复代码
+    private fun setupAppAdapter(
+        apps: List<AppEntry>,
+        recyclerView: RecyclerView,
+        editSearch: EditText,
+        dialog: AlertDialog
+    ) {
+        val adapter = AppListAdapter(apps) { entry ->
+            LinkAppPreference.set(this, noteUri, entry.packageName)
+            Toast.makeText(this, "已设为默认：${entry.label}", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+        recyclerView.adapter = adapter
+        editSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                adapter.filter(s?.toString() ?: "")
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
     }
 
     private fun loadInstalledApps(): List<AppEntry> {
@@ -191,15 +216,19 @@ class EditActivity : AppCompatActivity() {
         val resolveInfos: List<ResolveInfo> = packageManager.queryIntentActivities(mainIntent, 0)
 
         return resolveInfos
+            .filter { it.activityInfo.packageName != packageName }
+            .distinctBy { it.activityInfo.packageName }
+            // ✅ 修复5：先排序（只用文字，很快），再加载图标（只加载最终去重列表的图标）
+            .sortedWith(compareBy(
+                { PinyinUtils.getFirstLetter(it.loadLabel(packageManager).toString()) },
+                { it.loadLabel(packageManager).toString() }
+            ))
             .map { info ->
                 AppEntry(
                     label = info.loadLabel(packageManager).toString(),
                     packageName = info.activityInfo.packageName,
-                    icon = info.loadIcon(packageManager)
+                    icon = info.loadIcon(packageManager)  // 图标只加载一次
                 )
             }
-            .filter { it.packageName != packageName }
-            .distinctBy { it.packageName }
-            .sortedWith(compareBy({ PinyinUtils.getFirstLetter(it.label) }, { it.label }))
     }
 }
