@@ -162,22 +162,28 @@ class CategoryActivity : AppCompatActivity() {
                 val newName = editText.text.toString().trim()
                 if (newName.isNotEmpty() && newName != note.name) {
                     val repo = repository
-                    Thread {
-                        val renamed = repo?.renameNote(note.uri, newName)
-                        runOnUiThread {
-                            if (renamed != null) {
-                                val idx = notes.indexOfFirst { it.uri == note.uri }
-                                if (idx >= 0) {
-                                    notes[idx] = renamed
-                                    notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                                    adapter.submitEntries(notes)
+                    val idx = notes.indexOfFirst { it.uri == note.uri }
+                    if (idx >= 0) {
+                        val oldNote = notes[idx]
+                        notes[idx] = Note(newName, oldNote.uri)
+                        notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                        adapter.submitEntries(notes)
+
+                        Thread {
+                            val renamed = repo?.renameNote(oldNote.uri, newName)
+                            runOnUiThread {
+                                val curIdx = notes.indexOfFirst { it.uri == oldNote.uri }
+                                if (renamed != null) {
+                                    if (curIdx >= 0) notes[curIdx] = renamed
+                                } else {
+                                    if (curIdx >= 0) notes[curIdx] = oldNote
+                                    android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
                                 }
-                            } else {
-                                android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
+                                notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                adapter.submitEntries(notes)
                             }
-                        }
-                    }.start()
-                }
+                        }.start()
+                    }
             }
             .setNegativeButton("取消", null)
             .show()
@@ -209,4 +215,4 @@ class CategoryActivity : AppCompatActivity() {
         intent.putExtra("note_uri", note.uri.toString())
         startActivity(intent)
     }
-}
+    }
