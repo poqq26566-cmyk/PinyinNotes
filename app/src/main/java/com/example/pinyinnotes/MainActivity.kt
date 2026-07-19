@@ -177,21 +177,28 @@ class MainActivity : AppCompatActivity() {
                 val newName = editText.text.toString().trim()
                 if (newName.isNotEmpty() && newName != category.name) {
                     val repo = categoryRepository
-                    Thread {
-                        val renamed = repo?.renameCategory(this, category.uri, newName)
-                        runOnUiThread {
-                            if (renamed != null) {
-                                val idx = categories.indexOfFirst { it.uri == category.uri }
-                                if (idx >= 0) {
-                                    categories[idx] = renamed
-                                    categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                                    adapter.submitEntries(categories)
+                    val idx = categories.indexOfFirst { it.uri == category.uri }
+                    if (idx >= 0) {
+                        val oldCategory = categories[idx]
+                        categories[idx] = Category(newName, oldCategory.uri)
+                        categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                        adapter.submitEntries(categories)
+
+                        Thread {
+                            val renamed = repo?.renameCategory(this, oldCategory.uri, newName)
+                            runOnUiThread {
+                                val curIdx = categories.indexOfFirst { it.uri == oldCategory.uri }
+                                if (renamed != null) {
+                                    if (curIdx >= 0) categories[curIdx] = renamed
+                                } else {
+                                    if (curIdx >= 0) categories[curIdx] = oldCategory
+                                    Toast.makeText(this, "重命名失败", Toast.LENGTH_SHORT).show()
                                 }
-                            } else {
-                                Toast.makeText(this, "重命名失败", Toast.LENGTH_SHORT).show()
+                                categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                adapter.submitEntries(categories)
                             }
-                        }
-                    }.start()
+                        }.start()
+                    }
                 }
             }
             .setNegativeButton("取消", null)
