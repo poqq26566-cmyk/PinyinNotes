@@ -63,6 +63,17 @@ class NoteAdapter<T : NamedItem>(
 
     override fun getItemCount(): Int = items.size
 
+    /** 找到某个字母分组表头在列表中的位置，找不到返回 -1 */
+    fun getPositionForLetter(letter: String): Int {
+        for (i in items.indices) {
+            val item = items[i]
+            if (item is HeaderItem && item.letter == letter) {
+                return i
+            }
+        }
+        return -1
+    }
+
     class HeaderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val textView: TextView = itemView.findViewById(R.id.tvHeader)
         fun bind(letter: String) {
