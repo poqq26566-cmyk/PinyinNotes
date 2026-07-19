@@ -50,6 +50,11 @@ class MainActivity : AppCompatActivity() {
         )
         recyclerView.adapter = adapter
 
+        val letterIndexBar: android.widget.LinearLayout = findViewById(R.id.letterIndexBar)
+        LetterIndexBarHelper.setup(letterIndexBar, recyclerView) { letter ->
+            adapter.getPositionForLetter(letter)
+        }
+
         val fab: ImageButton = findViewById(R.id.fab)
         fab.setOnClickListener {
             if (categoryRepository == null) pickFolder() else showAddCategoryDialog()
