@@ -37,6 +37,11 @@ class CategoryActivity : AppCompatActivity() {
             )
             recyclerView.adapter = adapter
 
+            val letterIndexBar: android.widget.LinearLayout = findViewById(R.id.letterIndexBar)
+            LetterIndexBarHelper.setup(letterIndexBar, recyclerView) { letter ->
+                adapter.getPositionForLetter(letter)
+            }
+
             // 有缓存就先秒开显示，后台再刷新真实数据
             NotesCache.get(categoryUri)?.let {
                 notes = it.toMutableList()
