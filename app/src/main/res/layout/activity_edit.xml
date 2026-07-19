@@ -27,4 +27,17 @@
         android:contentDescription="切换编辑/阅读模式"
         android:elevation="6dp" />
 
+    <ImageButton
+        android:id="@+id/btnChooseApp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="76dp"
+        android:background="@drawable/bg_add_button"
+        android:src="@android:drawable/ic_menu_manage"
+        android:tint="@android:color/white"
+        android:contentDescription="选择默认打开App"
+        android:elevation="6dp" />
+
 </FrameLayout>
