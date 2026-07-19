@@ -3,13 +3,11 @@ package com.example.pinyinnotes
 import android.icu.text.Transliterator
 import android.os.Build
 
-/**
- * 使用 Android 内置 ICU 库（Han-Latin 转写）获取中文名称首字的拼音首字母，
- * 无需引入任何第三方拼音库。
- */
 object PinyinUtils {
 
     private var transliterator: Transliterator? = null
+    // ✅ 修复8：缓存已计算过的首字母，避免重复 transliterate + normalize
+    private val letterCache = HashMap<Char, String>(256)
 
     private fun getTransliterator(): Transliterator? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -21,7 +19,6 @@ object PinyinUtils {
         return null
     }
 
-    /** 返回名称首字符对应的拼音首字母（大写）；非中文/非字母开头返回 "#" */
     fun getFirstLetter(name: String): String {
         if (name.isEmpty()) return "#"
         val firstChar = name[0]
@@ -30,17 +27,22 @@ object PinyinUtils {
             return firstChar.uppercaseChar().toString()
         }
 
+        // ✅ 先查缓存
+        letterCache[firstChar]?.let { return it }
+
         val trans = getTransliterator()
-        if (trans != null) {
+        val result = if (trans != null) {
             val pinyin = trans.transliterate(firstChar.toString())
-            // 去掉拼音声调符号（如 à -> a），避免分组和排序错乱
             val stripped = java.text.Normalizer.normalize(pinyin, java.text.Normalizer.Form.NFD)
                 .replace(Regex("\\p{Mn}+"), "")
             val letter = stripped.firstOrNull { it.isLetter() && it.code < 128 }
-            if (letter != null) {
-                return letter.uppercaseChar().toString()
-            }
+            letter?.uppercaseChar()?.toString() ?: "#"
+        } else {
+            "#"
         }
-        return "#"
+
+        // ✅ 写入缓存
+        letterCache[firstChar] = result
+        return result
     }
 }
