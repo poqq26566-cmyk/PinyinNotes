@@ -133,13 +133,49 @@ class CategoryActivity : AppCompatActivity() {
     private fun showNoteOptions(note: Note) {
         AlertDialog.Builder(this)
             .setTitle(note.name)
-            .setItems(arrayOf("重命名", "删除")) { _, which ->
+            .setItems(arrayOf("重命名", "复制", "删除")) { _, which ->
                 when (which) {
                     0 -> showRenameNoteDialog(note)
-                    1 -> confirmDelete(note)
+                    1 -> copyNote(note)
+                    2 -> confirmDelete(note)
                 }
             }
             .show()
+    }
+
+    private fun copyNote(note: Note) {
+        var newName = "${note.name} 副本"
+        var suffix = 2
+        val existingNames = notes.map { it.name }.toMutableSet()
+        while (existingNames.contains(newName)) {
+            newName = "${note.name} 副本($suffix)"
+            suffix++
+        }
+
+        val repo = repository ?: return
+        val tempNote = Note(newName, Uri.EMPTY)
+        notes.add(tempNote)
+        notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+        adapter.submitEntries(notes)
+
+        Thread {
+            val content = DocStore.getContent(this, note.uri)
+            val realNote = repo.addNote(newName)
+            if (realNote != null) {
+                DocStore.setContent(this, realNote.uri, content)
+            }
+            runOnUiThread {
+                val idx = notes.indexOfFirst { it === tempNote }
+                if (idx >= 0) {
+                    if (realNote != null) {
+                        notes[idx] = realNote
+                    } else {
+                        notes.removeAt(idx)
+                    }
+                    adapter.submitEntries(notes)
+                }
+            }
+        }.start()
     }
 
     private fun showRenameNoteDialog(note: Note) {
