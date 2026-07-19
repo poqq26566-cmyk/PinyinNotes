@@ -165,14 +165,15 @@ class CategoryActivity : AppCompatActivity() {
                     val idx = notes.indexOfFirst { it.uri == note.uri }
                     if (idx >= 0) {
                         val oldNote = notes[idx]
-                        notes[idx] = Note(newName, oldNote.uri)
+                        val tempNote = Note(newName, Uri.EMPTY)
+                        notes[idx] = tempNote
                         notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
                         adapter.submitEntries(notes)
 
                         Thread {
                             val renamed = repo?.renameNote(oldNote.uri, newName)
                             runOnUiThread {
-                                val curIdx = notes.indexOfFirst { it.uri == oldNote.uri }
+                                val curIdx = notes.indexOfFirst { it === tempNote }
                                 if (renamed != null) {
                                     if (curIdx >= 0) notes[curIdx] = renamed
                                 } else {
@@ -209,7 +210,7 @@ class CategoryActivity : AppCompatActivity() {
 
     private fun openEdit(note: Note) {
         if (note.uri == Uri.EMPTY) {
-            android.widget.Toast.makeText(this, "还在创建中，请稍等", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(this, "正在处理，请稍等", android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         val intent = Intent(this, EditActivity::class.java)
