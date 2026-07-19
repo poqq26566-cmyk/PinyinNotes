@@ -33,7 +33,10 @@ object PinyinUtils {
         val trans = getTransliterator()
         if (trans != null) {
             val pinyin = trans.transliterate(firstChar.toString())
-            val letter = pinyin.firstOrNull { it.isLetter() }
+            // 去掉拼音声调符号（如 à -> a），避免分组和排序错乱
+            val stripped = java.text.Normalizer.normalize(pinyin, java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{Mn}+"), "")
+            val letter = stripped.firstOrNull { it.isLetter() && it.code < 128 }
             if (letter != null) {
                 return letter.uppercaseChar().toString()
             }
