@@ -47,6 +47,9 @@ class EditActivity : AppCompatActivity() {
     private var pendingSaveRunnable: Runnable? = null
     private val SAVE_DEBOUNCE_MS = 400L
 
+    // ✅ SharedPreferences 记录模式偏好
+    private val prefs by lazy { getSharedPreferences("edit_mode_prefs", MODE_PRIVATE) }
+
     companion object {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
@@ -87,6 +90,9 @@ class EditActivity : AppCompatActivity() {
         scrollReadView = findViewById(R.id.scrollReadView)
         tvReadView     = findViewById(R.id.tvReadView)
 
+        // ✅ 读取上次保存的模式偏好（默认 false = 编辑模式）
+        isReadMode = prefs.getBoolean(noteUri.toString(), false)
+
         // 注册键盘监听
         window.decorView.rootView
             .viewTreeObserver
@@ -100,6 +106,8 @@ class EditActivity : AppCompatActivity() {
                 editText.setText(content)
                 isLoadingContent = false
                 editText.requestFocus()
+                // ✅ 内容加载完成后应用模式
+                applyMode()
             }
         }.start()
 
@@ -116,12 +124,14 @@ class EditActivity : AppCompatActivity() {
 
         btnToggleMode.setOnClickListener {
             isReadMode = !isReadMode
+            // ✅ 保存模式偏好
+            prefs.edit().putBoolean(noteUri.toString(), isReadMode).apply()
             applyMode()
         }
 
         btnChooseApp.setOnClickListener { showAppPickerDialog() }
 
-        applyMode()
+        // ✅ 注意：applyMode() 移到内容加载完成后调用，避免加载完成前闪烁
     }
 
     override fun onPause() {
