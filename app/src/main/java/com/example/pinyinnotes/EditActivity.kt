@@ -38,15 +38,15 @@ class EditActivity : AppCompatActivity() {
     private lateinit var btnChooseApp: ImageButton
     private lateinit var scrollReadView: ScrollView
     private lateinit var tvReadView: TextView
-
     private var isReadMode = false
 
     companion object {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
 
+        // ✅ 修复空格问题：] 和 ( 之间允许有任意空白符 \s*
         private val MD_LINK_PATTERN: Pattern =
-            Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)")
+            Pattern.compile("\\[([^\\]]+)\\]\\s*\\(([^)]+)\\)")
     }
 
     private val protectLinkFilter = InputFilter { _, _, _, dest, dstart, dend ->
@@ -54,7 +54,7 @@ class EditActivity : AppCompatActivity() {
         val spans = dest.getSpans(0, dest.length, URLSpan::class.java)
         for (span in spans) {
             val spanStart = dest.getSpanStart(span)
-            val spanEnd = dest.getSpanEnd(span)
+            val spanEnd   = dest.getSpanEnd(span)
             if (dstart < spanEnd && dend > spanStart) {
                 return@InputFilter dest.subSequence(dstart, dend)
             }
@@ -62,23 +62,19 @@ class EditActivity : AppCompatActivity() {
         null
     }
 
-    // ✅ 键盘监听：键盘弹出时隐藏按钮，键盘收起时恢复
+    // ✅ 键盘监听：打字时隐藏按钮，键盘收起时恢复
     private val keyboardListener = ViewTreeObserver.OnGlobalLayoutListener {
         val rootView = window.decorView.rootView
         val rect = Rect()
         rootView.getWindowVisibleDisplayFrame(rect)
-        val screenHeight = rootView.height
+        val screenHeight  = rootView.height
         val keyboardHeight = screenHeight - rect.bottom
-
-        // 键盘高度超过屏幕 15% 则认为键盘弹出
         val keyboardVisible = keyboardHeight > screenHeight * 0.15
 
         if (keyboardVisible) {
-            // 打字中：隐藏两个按钮
             btnToggleMode.visibility = View.GONE
             btnChooseApp.visibility  = View.GONE
         } else {
-            // 键盘收起：恢复显示按钮
             btnToggleMode.visibility = View.VISIBLE
             btnChooseApp.visibility  = View.VISIBLE
         }
@@ -95,11 +91,12 @@ class EditActivity : AppCompatActivity() {
         scrollReadView = findViewById(R.id.scrollReadView)
         tvReadView     = findViewById(R.id.tvReadView)
 
-        // ✅ 注册键盘监听
+        // 注册键盘监听
         window.decorView.rootView
             .viewTreeObserver
             .addOnGlobalLayoutListener(keyboardListener)
 
+        // 子线程读取内容（含解密），完成后才允许 TextWatcher 触发保存
         var isLoadingContent = true
         Thread {
             val content = DocStore.getContent(this, noteUri)
@@ -116,6 +113,7 @@ class EditActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {
                 if (isLoadingContent) return
                 DocStore.setContent(this@EditActivity, noteUri, s.toString())
+                // 阅读模式下实时刷新渲染
                 if (isReadMode) renderMarkdownLinks(s.toString())
             }
         })
@@ -132,7 +130,7 @@ class EditActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // ✅ 退出时注销监听，防止内存泄漏
+        // 注销监听，防止内存泄漏
         window.decorView.rootView
             .viewTreeObserver
             .removeOnGlobalLayoutListener(keyboardListener)
@@ -140,12 +138,14 @@ class EditActivity : AppCompatActivity() {
 
     private fun applyMode() {
         if (isReadMode) {
+            // 阅读模式：隐藏编辑框，显示 ScrollView
             editText.visibility       = View.GONE
             scrollReadView.visibility = View.VISIBLE
             tvReadView.movementMethod = LinkMovementMethod.getInstance()
             renderMarkdownLinks(editText.text.toString())
             btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
         } else {
+            // 编辑模式：隐藏 ScrollView，显示编辑框
             scrollReadView.visibility = View.GONE
             editText.visibility       = View.VISIBLE
             editText.filters          = arrayOf()
@@ -156,20 +156,28 @@ class EditActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 解析 Markdown [文字](URL) → 可点击蓝色下划线链接
+     * ✅ 支持 ] 和 ( 之间有空格的情况，渲染时自动去除空格
+     * 剩余裸 URL 由 Linkify 自动处理
+     */
     private fun renderMarkdownLinks(text: String) {
         val builder = SpannableStringBuilder()
         val matcher = MD_LINK_PATTERN.matcher(text)
         var lastEnd = 0
 
         while (matcher.find()) {
+            // 追加匹配前的普通文本
             builder.append(text.substring(lastEnd, matcher.start()))
 
             val displayText = matcher.group(1) ?: ""
-            val url         = matcher.group(2) ?: ""
-            val spanStart   = builder.length
+            val url         = (matcher.group(2) ?: "").trim() // URL 去除首尾空格
+
+            val spanStart = builder.length
             builder.append(displayText)
             val spanEnd = builder.length
 
+            // 设置可点击 Span（蓝色 + 下划线）
             builder.setSpan(
                 object : ClickableSpan() {
                     override fun onClick(widget: View) { openLink(url) }
@@ -186,8 +194,11 @@ class EditActivity : AppCompatActivity() {
             lastEnd = matcher.end()
         }
 
+        // 追加剩余文本
         builder.append(text.substring(lastEnd))
+
         tvReadView.text = builder
+        // 对剩余裸 URL 也自动识别为可点击链接
         Linkify.addLinks(tvReadView, Linkify.WEB_URLS)
     }
 
