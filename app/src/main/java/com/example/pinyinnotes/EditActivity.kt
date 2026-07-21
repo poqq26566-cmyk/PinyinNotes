@@ -7,15 +7,15 @@ import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
-import android.text.InputFilter
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
-import android.text.style.URLSpan
 import android.text.util.Linkify
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewTreeObserver
@@ -40,6 +40,12 @@ class EditActivity : AppCompatActivity() {
     private lateinit var scrollReadView: ScrollView
     private lateinit var tvReadView: TextView
     private var isReadMode = false
+    private var isLoadingContent = true
+
+    // ✅ 保存改为防抖 + 子线程，避免每次按键都在主线程同步加密写盘
+    private val saveHandler = Handler(Looper.getMainLooper())
+    private var pendingSaveRunnable: Runnable? = null
+    private val SAVE_DEBOUNCE_MS = 400L
 
     companion object {
         @Volatile
@@ -48,19 +54,6 @@ class EditActivity : AppCompatActivity() {
         // ✅ 修复1：正则改为 [^)]* 允许括号内为空，覆盖空URL情况
         private val MD_LINK_PATTERN: Pattern =
             Pattern.compile("\\[([^\\]]+)\\]\\s*\\(([^)]*)\\)")
-    }
-
-    private val protectLinkFilter = InputFilter { _, _, _, dest, dstart, dend ->
-        if (dest !is Spanned) return@InputFilter null
-        val spans = dest.getSpans(0, dest.length, URLSpan::class.java)
-        for (span in spans) {
-            val spanStart = dest.getSpanStart(span)
-            val spanEnd   = dest.getSpanEnd(span)
-            if (dstart < spanEnd && dend > spanStart) {
-                return@InputFilter dest.subSequence(dstart, dend)
-            }
-        }
-        null
     }
 
     // 键盘监听：打字时隐藏按钮，键盘收起时恢复
@@ -98,7 +91,7 @@ class EditActivity : AppCompatActivity() {
             .addOnGlobalLayoutListener(keyboardListener)
 
         // 子线程读取内容（含解密），完成后才允许 TextWatcher 触发保存
-        var isLoadingContent = true
+        isLoadingContent = true
         Thread {
             val content = DocStore.getContent(this, noteUri)
             runOnUiThread {
@@ -113,7 +106,7 @@ class EditActivity : AppCompatActivity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 if (isLoadingContent) return
-                DocStore.setContent(this@EditActivity, noteUri, s.toString())
+                scheduleSave(s.toString())
                 // 阅读模式下实时刷新渲染
                 if (isReadMode) renderMarkdownLinks(s.toString())
             }
@@ -129,12 +122,42 @@ class EditActivity : AppCompatActivity() {
         applyMode()
     }
 
+    override fun onPause() {
+        super.onPause()
+        // 离开页面前立刻落盘，不等防抖计时器，防止丢失最后几个字
+        flushSave()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // 注销监听，防止内存泄漏
         window.decorView.rootView
             .viewTreeObserver
             .removeOnGlobalLayoutListener(keyboardListener)
+        pendingSaveRunnable?.let { saveHandler.removeCallbacks(it) }
+    }
+
+    /** 停止输入 SAVE_DEBOUNCE_MS 后，在子线程加密写盘一次 */
+    private fun scheduleSave(content: String) {
+        pendingSaveRunnable?.let { saveHandler.removeCallbacks(it) }
+        val runnable = Runnable { writeToDisk(content) }
+        pendingSaveRunnable = runnable
+        saveHandler.postDelayed(runnable, SAVE_DEBOUNCE_MS)
+    }
+
+    /** 立刻取消防抖计时器并同步保存当前内容（用于退出页面时） */
+    private fun flushSave() {
+        pendingSaveRunnable?.let { saveHandler.removeCallbacks(it) }
+        pendingSaveRunnable = null
+        if (!isLoadingContent) {
+            writeToDisk(editText.text.toString())
+        }
+    }
+
+    private fun writeToDisk(content: String) {
+        Thread {
+            DocStore.setContent(this@EditActivity, noteUri, content)
+        }.start()
     }
 
     private fun applyMode() {
