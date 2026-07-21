@@ -30,9 +30,23 @@ class MainActivity : AppCompatActivity() {
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-            prefs.edit().putString("tree_uri", uri.toString()).apply()
-            categoryRepository = CategoryRepository(this, uri)
-            refreshList()
+            // 先在子线程初始化密钥，成功后再创建 repository
+            Thread {
+                val ok = KeyManager.loadOrCreate(this, uri)
+                runOnUiThread {
+                    if (ok) {
+                        prefs.edit().putString("tree_uri", uri.toString()).apply()
+                        try {
+                            categoryRepository = CategoryRepository(this, uri)
+                            refreshList()
+                        } catch (e: Exception) {
+                            Toast.makeText(this, "文件夹初始化失败，请重试", Toast.LENGTH_LONG).show()
+                        }
+                    } else {
+                        Toast.makeText(this, "密钥初始化失败，请重新选择文件夹", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }.start()
         } else {
             Toast.makeText(this, "需要选择一个文件夹才能使用", Toast.LENGTH_LONG).show()
         }
@@ -63,15 +77,28 @@ class MainActivity : AppCompatActivity() {
         val btnCheckDuplicate: android.widget.Button = findViewById(R.id.btnCheckDuplicate)
         btnCheckDuplicate.setOnClickListener { checkDuplicates() }
 
+        // 启动时读取上次保存的文件夹，先加载密钥再初始化 repository
         val savedUri = prefs.getString("tree_uri", null)
         if (savedUri != null) {
-            try {
-                categoryRepository = CategoryRepository(this, Uri.parse(savedUri))
-            } catch (e: Exception) {
-                categoryRepository = null
-            }
-        }
-        if (categoryRepository == null) {
+            Thread {
+                val uri = Uri.parse(savedUri)
+                val ok = KeyManager.loadOrCreate(this, uri)
+                runOnUiThread {
+                    if (ok) {
+                        try {
+                            categoryRepository = CategoryRepository(this, uri)
+                            refreshList()
+                        } catch (e: Exception) {
+                            categoryRepository = null
+                            pickFolder()
+                        }
+                    } else {
+                        // 密钥文件读取失败（可能权限失效），重新选文件夹
+                        pickFolder()
+                    }
+                }
+            }.start()
+        } else {
             pickFolder()
         }
     }
