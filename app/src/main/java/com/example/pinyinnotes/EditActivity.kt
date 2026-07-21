@@ -63,10 +63,12 @@ class EditActivity : AppCompatActivity() {
         btnChooseApp = findViewById(R.id.btnChooseApp)
 
         // ✅ 修复2：内容读取（含解密）移到子线程，避免卡住主线程
+        var isLoadingContent = true
         Thread {
             val content = DocStore.getContent(this, noteUri)
             runOnUiThread {
                 editText.setText(content)
+                isLoadingContent = false
                 editText.requestFocus()
             }
         }.start()
@@ -75,6 +77,7 @@ class EditActivity : AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
+                if (isLoadingContent) return
                 DocStore.setContent(this@EditActivity, noteUri, s.toString())
                 if (isReadMode) {
                     Linkify.addLinks(editText, Linkify.WEB_URLS)
