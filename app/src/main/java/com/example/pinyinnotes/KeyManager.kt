@@ -36,6 +36,16 @@ object KeyManager {
                     cachedKey = SecretKeySpec(keyBytes, "AES")
                     return true
                 }
+                // ✅ 修复：密钥文件存在但已损坏（大小不对），原地覆盖写回，
+                // 不要新建同名文件——否则某些 SAF provider 会自动生成
+                // "_vault (1).key" 之类的第二个文件，下次启动 listFiles()
+                // 选到哪个是不确定的，会导致笔记时而能解密、时而不能。
+                val newKeyBytes = ByteArray(KEY_SIZE).also { SecureRandom().nextBytes(it) }
+                context.contentResolver.openOutputStream(keyFile.uri, "wt")
+                    ?.use { it.write(newKeyBytes) }
+                    ?: return false
+                cachedKey = SecretKeySpec(newKeyBytes, "AES")
+                return true
             }
 
             // 2. 首次使用：生成随机密钥并写入文件夹
