@@ -1,237 +1,225 @@
 package com.example.pinyinnotes
 
 import android.content.Intent
-import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Bundle
-import android.text.Editable
-import android.text.InputFilter
-import android.text.Spannable
-import android.text.Spanned
-import android.text.TextWatcher
-import android.text.method.ArrowKeyMovementMethod
-import android.text.method.LinkMovementMethod
-import android.text.style.URLSpan
-import android.text.util.Linkify
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.ProgressBar   // ✅ 新增
-import android.widget.Toast
-import android.view.View             // ✅ 新增
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
-class EditActivity : AppCompatActivity() {
+/** 分类内页：显示该分类下的笔记，按拼音 A-Z 分组 */
+class CategoryActivity : AppCompatActivity() {
 
-    private lateinit var noteUri: Uri
-    private lateinit var editText: EditText
-    private lateinit var btnToggleMode: ImageButton
-    private lateinit var btnChooseApp: ImageButton
-    private var isReadMode = false
-
-    // ✅ 修复1：应用列表全局缓存，整个App生命周期只加载一次图标
-    companion object {
-        @Volatile
-        private var cachedApps: List<AppEntry>? = null
-    }
-
-    private val protectLinkFilter = InputFilter { _, _, _, dest, dstart, dend ->
-        if (dest !is Spanned) return@InputFilter null
-        val spans = dest.getSpans(0, dest.length, URLSpan::class.java)
-        for (span in spans) {
-            val spanStart = dest.getSpanStart(span)
-            val spanEnd = dest.getSpanEnd(span)
-            if (dstart < spanEnd && dend > spanStart) {
-                return@InputFilter dest.subSequence(dstart, dend)
-            }
-        }
-        null
-    }
+    private var repository: NoteRepository? = null
+    private lateinit var adapter: NoteAdapter<Note>
+    private var categoryUri: Uri = Uri.EMPTY
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_edit)
+        setContentView(R.layout.activity_main)
 
-        noteUri = Uri.parse(intent.getStringExtra("note_uri"))
+        try {
+            categoryUri = Uri.parse(intent.getStringExtra("category_uri"))
+            val categoryDoc = DocumentFile.fromTreeUri(this, categoryUri)
+                ?: throw IllegalStateException("无法访问该分类")
+            repository = NoteRepository(this, categoryDoc)
 
-        editText = findViewById(R.id.editContent)
-        btnToggleMode = findViewById(R.id.btnToggleMode)
-        btnChooseApp = findViewById(R.id.btnChooseApp)
+            val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
+            recyclerView.layoutManager = LinearLayoutManager(this)
+            adapter = NoteAdapter(
+                onClick = { note -> openEdit(note) },
+                onLongClick = { note -> showNoteOptions(note) }
+            )
+            recyclerView.adapter = adapter
 
-        // ✅ 修复2：内容读取（含解密）移到子线程，避免卡住主线程
-        var isLoadingContent = true
+            val letterIndexBar: android.widget.LinearLayout = findViewById(R.id.letterIndexBar)
+            LetterIndexBarHelper.setup(letterIndexBar, recyclerView) { letter ->
+                adapter.getPositionForLetter(letter)
+            }
+
+            // 有缓存就先秒开显示，后台再刷新真实数据
+            NotesCache.get(categoryUri)?.let {
+                notes = it.toMutableList()
+                adapter.submitEntries(notes)
+            }
+
+            val fab: ImageButton = findViewById(R.id.fab)
+            fab.setOnClickListener { showAddDialog() }
+
+            val btnCheckDuplicate: android.widget.Button = findViewById(R.id.btnCheckDuplicate)
+            btnCheckDuplicate.setOnClickListener { checkDuplicates() }
+        } catch (e: Exception) {
+            AlertDialog.Builder(this)
+                .setTitle("出错了")
+                .setMessage(e.toString() + "\n\n" + e.stackTraceToString().take(1000))
+                .setPositiveButton("确定") { _, _ -> finish() }
+                .setCancelable(false)
+                .show()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshList()
+    }
+
+    private var notes = mutableListOf<Note>()
+
+    private fun refreshList() {
+        val repo = repository ?: return
         Thread {
-            val content = DocStore.getContent(this, noteUri)
+            val list = repo.getAllNotes()
+            NotesCache.put(categoryUri, list)
             runOnUiThread {
-                editText.setText(content)
-                isLoadingContent = false
-                editText.requestFocus()
+                notes = list.toMutableList()
+                adapter.submitEntries(notes)
             }
         }.start()
+    }
 
-        editText.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (isLoadingContent) return
-                DocStore.setContent(this@EditActivity, noteUri, s.toString())
-                if (isReadMode) {
-                    Linkify.addLinks(editText, Linkify.WEB_URLS)
+    private fun showAddDialog() {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        AlertDialog.Builder(this)
+            .setTitle("新建名称")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val name = editText.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val repo = repository
+
+                    val tempNote = Note(name, Uri.EMPTY)
+                    notes.add(tempNote)
+                    notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                    adapter.submitEntries(notes)
+
+                    Thread {
+                        val realNote = repo?.addNote(name)
+                        runOnUiThread {
+                            val idx = notes.indexOfFirst { it === tempNote }
+                            if (idx >= 0) {
+                                if (realNote != null) {
+                                    notes[idx] = realNote
+                                } else {
+                                    notes.removeAt(idx)
+                                }
+                                adapter.submitEntries(notes)
+                            }
+                        }
+                    }.start()
                 }
             }
-        })
-
-        btnToggleMode.setOnClickListener {
-            isReadMode = !isReadMode
-            applyMode()
-        }
-
-        btnChooseApp.setOnClickListener { showAppPickerDialog() }
-
-        applyMode()
+            .setNegativeButton("取消", null)
+            .show()
     }
 
-    private fun applyMode() {
-        if (isReadMode) {
-            Linkify.addLinks(editText, Linkify.WEB_URLS)
-            editText.movementMethod = LinkMovementMethod.getInstance()
-            editText.filters = arrayOf(protectLinkFilter)
-            editText.setOnTouchListener(::handleLinkTouch)
-            btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
-        } else {
-            editText.filters = arrayOf()
-            editText.movementMethod = ArrowKeyMovementMethod.getInstance()
-            editText.setOnTouchListener(null)
-            btnToggleMode.setImageResource(android.R.drawable.ic_menu_edit)
-        }
+    private fun confirmDelete(note: Note) {
+        AlertDialog.Builder(this)
+            .setTitle("删除\u201c${note.name}\u201d")
+            .setMessage("删除后无法恢复，确定吗？")
+            .setPositiveButton("删除") { _, _ ->
+                notes.removeAll { it.uri == note.uri }
+                adapter.submitEntries(notes)
+
+                val repo = repository
+                Thread {
+                    repo?.deleteNote(note.uri)
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
-    private fun handleLinkTouch(view: android.view.View, event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_UP) {
-            val et = view as EditText
-            val layout = et.layout
-            if (layout != null) {
-                val y = event.y - et.totalPaddingTop + et.scrollY
-                val x = event.x - et.totalPaddingLeft + et.scrollX
-                if (y >= 0 && y <= layout.height) {
-                    val line = layout.getLineForVertical(y.toInt())
-                    if (x >= layout.getLineLeft(line) && x <= layout.getLineRight(line)) {
-                        val offset = layout.getOffsetForHorizontal(line, x)
-                        val spannable = et.text as? Spannable
-                        val spans = spannable?.getSpans(offset, offset, URLSpan::class.java)
-                        if (!spans.isNullOrEmpty()) {
-                            openLink(spans[0].url)
-                            return true
-                        }
+    private fun showNoteOptions(note: Note) {
+        AlertDialog.Builder(this)
+            .setTitle(note.name)
+            .setItems(arrayOf("重命名", "复制名称", "删除")) { _, which ->
+                when (which) {
+                    0 -> showRenameNoteDialog(note)
+                    1 -> copyNoteName(note)
+                    2 -> confirmDelete(note)
+                }
+            }
+            .show()
+    }
+
+    // ✅ 修复：直接复制笔记名称，不读取文件内容
+    private fun copyNoteName(note: Note) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("note_name", note.name)
+        clipboard.setPrimaryClip(clip)
+        android.widget.Toast.makeText(this, "已复制：${note.name}", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showRenameNoteDialog(note: Note) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        editText.setText(note.name)
+        AlertDialog.Builder(this)
+            .setTitle("重命名")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val newName = editText.text.toString().trim()
+                if (newName.isNotEmpty() && newName != note.name) {
+                    val repo = repository
+                    val idx = notes.indexOfFirst { it.uri == note.uri }
+                    if (idx >= 0) {
+                        val oldNote = notes[idx]
+                        val tempNote = Note(newName, Uri.EMPTY)
+                        notes[idx] = tempNote
+                        notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                        adapter.submitEntries(notes)
+
+                        Thread {
+                            val renamed = repo?.renameNote(oldNote.uri, newName)
+                            runOnUiThread {
+                                val curIdx = notes.indexOfFirst { it === tempNote }
+                                if (renamed != null) {
+                                    if (curIdx >= 0) notes[curIdx] = renamed
+                                } else {
+                                    if (curIdx >= 0) notes[curIdx] = oldNote
+                                    android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                                notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                                adapter.submitEntries(notes)
+                            }
+                        }.start()
                     }
                 }
             }
-        }
-        return false
-    }
-
-    private fun openLink(url: String) {
-        val preferredPackage = LinkAppPreference.get(this, noteUri)
-        if (preferredPackage != null) {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            intent.setPackage(preferredPackage)
-            try {
-                startActivity(intent)
-                return
-            } catch (e: Exception) {
-                val launchIntent = packageManager.getLaunchIntentForPackage(preferredPackage)
-                if (launchIntent != null) {
-                    startActivity(launchIntent)
-                    return
-                }
-            }
-        }
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-    }
-
-    private fun showAppPickerDialog() {
-        val view = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
-        val editSearch = view.findViewById<EditText>(R.id.editSearchApp)
-        val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerApps)
-        // ✅ 修复3：加载时显示进度条，给用户反馈
-        val progressBar = view.findViewById<ProgressBar>(R.id.progressBarApps)
-        recyclerView.layoutManager = LinearLayoutManager(this)
-
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("选择默认打开App")
-            .setView(view)
             .setNegativeButton("取消", null)
-            .setNeutralButton("清除选择") { _, _ ->
-                LinkAppPreference.clear(this, noteUri)
-                Toast.makeText(this, "已恢复系统默认方式", Toast.LENGTH_SHORT).show()
-            }
-            .create()
+            .show()
+    }
 
-        // ✅ 修复4：有缓存直接用，无需等待
-        val cached = cachedApps
-        if (cached != null) {
-            progressBar?.visibility = View.GONE
-            setupAppAdapter(cached, recyclerView, editSearch, dialog)
+    private fun checkDuplicates() {
+        val dups = notes.groupBy { it.name }.filter { it.value.size > 1 }
+        val result = if (dups.isEmpty()) {
+            "没有发现重复名称"
         } else {
-            progressBar?.visibility = View.VISIBLE
-            Thread {
-                val apps = loadInstalledApps()
-                cachedApps = apps  // 写入缓存
-                runOnUiThread {
-                    progressBar?.visibility = View.GONE
-                    setupAppAdapter(apps, recyclerView, editSearch, dialog)
-                }
-            }.start()
+            buildString {
+                append("重复的笔记名称：\n")
+                dups.keys.forEach { append("• $it\n") }
+            }
         }
-
-        dialog.show()
+        AlertDialog.Builder(this)
+            .setTitle("重复名称检测结果")
+            .setMessage(result)
+            .setPositiveButton("确定", null)
+            .show()
     }
 
-    // ✅ 抽取公共方法，避免重复代码
-    private fun setupAppAdapter(
-        apps: List<AppEntry>,
-        recyclerView: RecyclerView,
-        editSearch: EditText,
-        dialog: AlertDialog
-    ) {
-        val adapter = AppListAdapter(apps) { entry ->
-            LinkAppPreference.set(this, noteUri, entry.packageName)
-            Toast.makeText(this, "已设为默认：${entry.label}", Toast.LENGTH_SHORT).show()
-            dialog.dismiss()
+    private fun openEdit(note: Note) {
+        if (note.uri == Uri.EMPTY) {
+            android.widget.Toast.makeText(this, "正在处理，请稍等", android.widget.Toast.LENGTH_SHORT).show()
+            return
         }
-        recyclerView.adapter = adapter
-        editSearch.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                adapter.filter(s?.toString() ?: "")
-            }
-            override fun afterTextChanged(s: Editable?) {}
-        })
-    }
-
-    private fun loadInstalledApps(): List<AppEntry> {
-        val mainIntent = Intent(Intent.ACTION_MAIN, null)
-        mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
-        val resolveInfos: List<ResolveInfo> = packageManager.queryIntentActivities(mainIntent, 0)
-
-        return resolveInfos
-            .filter { it.activityInfo.packageName != packageName }
-            .distinctBy { it.activityInfo.packageName }
-            // ✅ 修复5：先排序（只用文字，很快），再加载图标（只加载最终去重列表的图标）
-            .sortedWith(compareBy(
-                { PinyinUtils.getFirstLetter(it.loadLabel(packageManager).toString()) },
-                { it.loadLabel(packageManager).toString() }
-            ))
-            .map { info ->
-                AppEntry(
-                    label = info.loadLabel(packageManager).toString(),
-                    packageName = info.activityInfo.packageName,
-                    icon = info.loadIcon(packageManager)  // 图标只加载一次
-                )
-            }
+        val intent = Intent(this, EditActivity::class.java)
+        intent.putExtra("note_uri", note.uri.toString())
+        startActivity(intent)
     }
 }
