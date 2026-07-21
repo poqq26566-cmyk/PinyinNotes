@@ -16,7 +16,8 @@
         android:hint="开始输入..."
         android:importantForAutofill="no" />
 
-    <!-- ✅ 新增：阅读模式下渲染 Markdown 链接的 TextView -->
+    <!-- 阅读模式：渲染 Markdown 链接的 ScrollView（默认隐藏） -->
+    <!-- ✅ 关键：用 id=scrollReadView 在代码里控制整个容器的可见性 -->
     <ScrollView
         android:id="@+id/scrollReadView"
         android:layout_width="match_parent"
