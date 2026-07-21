@@ -14,7 +14,7 @@ private data class EntryListItem<T : NamedItem>(val entry: T) : ListItem()
 class NoteAdapter<T : NamedItem>(
     private val onClick: (T) -> Unit,
     private val onLongClick: (T) -> Unit,
-    private val getWordCount: ((T) -> Int)? = null  // ✅ 新增：获取字数的回调
+    private val getWordCount: ((T) -> Int)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<ListItem>()
@@ -69,7 +69,6 @@ class NoteAdapter<T : NamedItem>(
 
     override fun getItemCount(): Int = items.size
 
-    /** 找到某个字母分组表头在列表中的位置，找不到返回 -1 */
     fun getPositionForLetter(letter: String): Int {
         for (i in items.indices) {
             val item = items[i]
@@ -99,11 +98,10 @@ class NoteAdapter<T : NamedItem>(
         ) {
             textView.text = entry.name
 
-            // ✅ 显示字数
             if (getWordCount != null) {
                 val count = getWordCount(entry)
                 if (count > 0) {
-                    tvWordCount.text = "$count字"
+                    tvWordCount.text = count.toString() + "字"
                     tvWordCount.visibility = View.VISIBLE
                 } else {
                     tvWordCount.visibility = View.GONE
