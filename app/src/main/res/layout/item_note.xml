@@ -12,22 +12,25 @@
     android:paddingTop="14dp"
     android:paddingBottom="14dp">
 
+    <!-- 名称：最大宽度限制，防止超长名称把字数挤出屏幕 -->
     <TextView
         android:id="@+id/tvName"
-        android:layout_width="0dp"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
+        android:layout_weight="0"
+        android:maxWidth="240dp"
         android:textSize="17sp"
         android:maxLines="1"
         android:ellipsize="end" />
 
+    <!-- 字数：紧贴名称右侧，marginStart 现在真正生效 -->
     <TextView
         android:id="@+id/tvWordCount"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textSize="12sp"
         android:textColor="#999999"
-        android:layout_marginStart="10dp"
+        android:layout_marginStart="4dp"
         android:paddingStart="4dp"
         android:paddingEnd="4dp" />
 
