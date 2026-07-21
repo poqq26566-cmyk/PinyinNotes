@@ -13,18 +13,16 @@ import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
-import android.text.style.ForegroundColorSpan
 import android.text.style.URLSpan
-import android.text.style.UnderlineSpan
 import android.text.util.Linkify
 import android.view.LayoutInflater
-import android.view.MotionEvent
+import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -37,15 +35,18 @@ class EditActivity : AppCompatActivity() {
     private lateinit var editText: EditText
     private lateinit var btnToggleMode: ImageButton
     private lateinit var btnChooseApp: ImageButton
-    // ✅ 新增：阅读模式下显示渲染结果的 TextView
+
+    // ✅ 关键修复：引用 ScrollView（父容器），而不是内部 TextView
+    private lateinit var scrollReadView: ScrollView
     private lateinit var tvReadView: TextView
+
     private var isReadMode = false
 
     companion object {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
 
-        // ✅ Markdown 超链接正则：匹配 [文字](URL)
+        // Markdown [文字](URL) 正则
         private val MD_LINK_PATTERN: Pattern =
             Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)")
     }
@@ -69,12 +70,14 @@ class EditActivity : AppCompatActivity() {
 
         noteUri = Uri.parse(intent.getStringExtra("note_uri"))
 
-        editText = findViewById(R.id.editContent)
+        editText      = findViewById(R.id.editContent)
         btnToggleMode = findViewById(R.id.btnToggleMode)
-        btnChooseApp = findViewById(R.id.btnChooseApp)
-        // ✅ 新增：获取阅读视图
-        tvReadView = findViewById(R.id.tvReadView)
+        btnChooseApp  = findViewById(R.id.btnChooseApp)
+        // ✅ 修复：取 ScrollView 的引用
+        scrollReadView = findViewById(R.id.scrollReadView)
+        tvReadView     = findViewById(R.id.tvReadView)
 
+        // 子线程读取内容（含解密），完成后才允许 TextWatcher 触发保存
         var isLoadingContent = true
         Thread {
             val content = DocStore.getContent(this, noteUri)
@@ -91,10 +94,8 @@ class EditActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {
                 if (isLoadingContent) return
                 DocStore.setContent(this@EditActivity, noteUri, s.toString())
-                if (isReadMode) {
-                    // ✅ 切换到渲染视图更新
-                    renderMarkdownLinks(s.toString())
-                }
+                // 阅读模式下实时刷新渲染结果
+                if (isReadMode) renderMarkdownLinks(s.toString())
             }
         })
 
@@ -110,26 +111,29 @@ class EditActivity : AppCompatActivity() {
 
     private fun applyMode() {
         if (isReadMode) {
-            // ✅ 阅读模式：隐藏编辑框，显示渲染 TextView
-            editText.visibility = View.GONE
-            tvReadView.visibility = View.VISIBLE
-            renderMarkdownLinks(editText.text.toString())
+            // ✅ 关键修复：显示 ScrollView（父容器），隐藏 EditText
+            editText.visibility      = View.GONE
+            scrollReadView.visibility = View.VISIBLE
+
             tvReadView.movementMethod = LinkMovementMethod.getInstance()
+            renderMarkdownLinks(editText.text.toString())
             btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
         } else {
-            // ✅ 编辑模式：显示编辑框，隐藏渲染 TextView
-            tvReadView.visibility = View.GONE
-            editText.visibility = View.VISIBLE
-            editText.filters = arrayOf()
+            // ✅ 关键修复：隐藏 ScrollView（父容器），显示 EditText
+            scrollReadView.visibility = View.GONE
+            editText.visibility       = View.VISIBLE
+
+            editText.filters        = arrayOf()
             editText.movementMethod = ArrowKeyMovementMethod.getInstance()
             editText.setOnTouchListener(null)
             btnToggleMode.setImageResource(android.R.drawable.ic_menu_edit)
+            editText.requestFocus()
         }
     }
 
     /**
-     * ✅ 核心：解析 Markdown [文字](URL) 超链接语法，渲染为可点击 Span
-     * 同时保留普通 http/https 裸链接的自动识别（Linkify）
+     * 解析 Markdown [文字](URL) → 可点击蓝色下划线链接
+     * 剩余裸 URL 由 Linkify 自动处理
      */
     private fun renderMarkdownLinks(text: String) {
         val builder = SpannableStringBuilder()
@@ -137,33 +141,29 @@ class EditActivity : AppCompatActivity() {
         var lastEnd = 0
 
         while (matcher.find()) {
-            // 追加匹配前的普通文本
-            val before = text.substring(lastEnd, matcher.start())
-            builder.append(before)
+            // 先追加匹配前的普通文本
+            builder.append(text.substring(lastEnd, matcher.start()))
 
             val displayText = matcher.group(1) ?: ""
-            val url = matcher.group(2) ?: ""
+            val url         = matcher.group(2) ?: ""
 
             val spanStart = builder.length
             builder.append(displayText)
             val spanEnd = builder.length
 
-            // 设置可点击 Span（蓝色 + 下划线）
-            val clickableSpan = object : ClickableSpan() {
-                override fun onClick(widget: View) {
-                    openLink(url)
-                }
-
-                override fun updateDrawState(ds: android.text.TextPaint) {
-                    super.updateDrawState(ds)
-                    ds.color = 0xFF1565C0.toInt()   // 蓝色
-                    ds.isUnderlineText = true
-                    ds.bgColor = 0x00000000          // 点击时无背景色
-                }
-            }
-            builder.setSpan(clickableSpan, spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            // 同时加一层 URLSpan 方便长按复制链接（系统行为）
-            builder.setSpan(URLSpan(url), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            // 设置可点击 Span
+            builder.setSpan(
+                object : ClickableSpan() {
+                    override fun onClick(widget: View) { openLink(url) }
+                    override fun updateDrawState(ds: android.text.TextPaint) {
+                        super.updateDrawState(ds)
+                        ds.color          = 0xFF1565C0.toInt()
+                        ds.isUnderlineText = true
+                    }
+                },
+                spanStart, spanEnd,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
 
             lastEnd = matcher.end()
         }
@@ -171,8 +171,8 @@ class EditActivity : AppCompatActivity() {
         // 追加剩余文本
         builder.append(text.substring(lastEnd))
 
-        // ✅ 对剩余的裸 URL（非 Markdown 格式）也自动 Linkify
         tvReadView.text = builder
+        // 对剩余裸 URL 也自动识别
         Linkify.addLinks(tvReadView, Linkify.WEB_URLS)
     }
 
@@ -196,8 +196,8 @@ class EditActivity : AppCompatActivity() {
     }
 
     private fun showAppPickerDialog() {
-        val view = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
-        val editSearch = view.findViewById<EditText>(R.id.editSearchApp)
+        val view        = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
+        val editSearch  = view.findViewById<EditText>(R.id.editSearchApp)
         val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerApps)
         val progressBar = view.findViewById<ProgressBar>(R.id.progressBarApps)
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -256,7 +256,6 @@ class EditActivity : AppCompatActivity() {
         val mainIntent = Intent(Intent.ACTION_MAIN, null)
         mainIntent.addCategory(Intent.CATEGORY_LAUNCHER)
         val resolveInfos: List<ResolveInfo> = packageManager.queryIntentActivities(mainIntent, 0)
-
         return resolveInfos
             .filter { it.activityInfo.packageName != packageName }
             .distinctBy { it.activityInfo.packageName }
@@ -266,9 +265,9 @@ class EditActivity : AppCompatActivity() {
             ))
             .map { info ->
                 AppEntry(
-                    label = info.loadLabel(packageManager).toString(),
+                    label       = info.loadLabel(packageManager).toString(),
                     packageName = info.activityInfo.packageName,
-                    icon = info.loadIcon(packageManager)
+                    icon        = info.loadIcon(packageManager)
                 )
             }
     }
