@@ -7,23 +7,29 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.InputFilter
 import android.text.Spannable
+import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
 import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
+import android.text.style.ForegroundColorSpan
 import android.text.style.URLSpan
+import android.text.style.UnderlineSpan
 import android.text.util.Linkify
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.ProgressBar   // ✅ 新增
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
-import android.view.View             // ✅ 新增
+import android.view.View
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import java.util.regex.Pattern
 
 class EditActivity : AppCompatActivity() {
 
@@ -31,12 +37,17 @@ class EditActivity : AppCompatActivity() {
     private lateinit var editText: EditText
     private lateinit var btnToggleMode: ImageButton
     private lateinit var btnChooseApp: ImageButton
+    // ✅ 新增：阅读模式下显示渲染结果的 TextView
+    private lateinit var tvReadView: TextView
     private var isReadMode = false
 
-    // ✅ 修复1：应用列表全局缓存，整个App生命周期只加载一次图标
     companion object {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
+
+        // ✅ Markdown 超链接正则：匹配 [文字](URL)
+        private val MD_LINK_PATTERN: Pattern =
+            Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)")
     }
 
     private val protectLinkFilter = InputFilter { _, _, _, dest, dstart, dend ->
@@ -61,8 +72,9 @@ class EditActivity : AppCompatActivity() {
         editText = findViewById(R.id.editContent)
         btnToggleMode = findViewById(R.id.btnToggleMode)
         btnChooseApp = findViewById(R.id.btnChooseApp)
+        // ✅ 新增：获取阅读视图
+        tvReadView = findViewById(R.id.tvReadView)
 
-        // ✅ 修复2：内容读取（含解密）移到子线程，避免卡住主线程
         var isLoadingContent = true
         Thread {
             val content = DocStore.getContent(this, noteUri)
@@ -80,7 +92,8 @@ class EditActivity : AppCompatActivity() {
                 if (isLoadingContent) return
                 DocStore.setContent(this@EditActivity, noteUri, s.toString())
                 if (isReadMode) {
-                    Linkify.addLinks(editText, Linkify.WEB_URLS)
+                    // ✅ 切换到渲染视图更新
+                    renderMarkdownLinks(s.toString())
                 }
             }
         })
@@ -97,12 +110,16 @@ class EditActivity : AppCompatActivity() {
 
     private fun applyMode() {
         if (isReadMode) {
-            Linkify.addLinks(editText, Linkify.WEB_URLS)
-            editText.movementMethod = LinkMovementMethod.getInstance()
-            editText.filters = arrayOf(protectLinkFilter)
-            editText.setOnTouchListener(::handleLinkTouch)
+            // ✅ 阅读模式：隐藏编辑框，显示渲染 TextView
+            editText.visibility = View.GONE
+            tvReadView.visibility = View.VISIBLE
+            renderMarkdownLinks(editText.text.toString())
+            tvReadView.movementMethod = LinkMovementMethod.getInstance()
             btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
         } else {
+            // ✅ 编辑模式：显示编辑框，隐藏渲染 TextView
+            tvReadView.visibility = View.GONE
+            editText.visibility = View.VISIBLE
             editText.filters = arrayOf()
             editText.movementMethod = ArrowKeyMovementMethod.getInstance()
             editText.setOnTouchListener(null)
@@ -110,28 +127,53 @@ class EditActivity : AppCompatActivity() {
         }
     }
 
-    private fun handleLinkTouch(view: android.view.View, event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_UP) {
-            val et = view as EditText
-            val layout = et.layout
-            if (layout != null) {
-                val y = event.y - et.totalPaddingTop + et.scrollY
-                val x = event.x - et.totalPaddingLeft + et.scrollX
-                if (y >= 0 && y <= layout.height) {
-                    val line = layout.getLineForVertical(y.toInt())
-                    if (x >= layout.getLineLeft(line) && x <= layout.getLineRight(line)) {
-                        val offset = layout.getOffsetForHorizontal(line, x)
-                        val spannable = et.text as? Spannable
-                        val spans = spannable?.getSpans(offset, offset, URLSpan::class.java)
-                        if (!spans.isNullOrEmpty()) {
-                            openLink(spans[0].url)
-                            return true
-                        }
-                    }
+    /**
+     * ✅ 核心：解析 Markdown [文字](URL) 超链接语法，渲染为可点击 Span
+     * 同时保留普通 http/https 裸链接的自动识别（Linkify）
+     */
+    private fun renderMarkdownLinks(text: String) {
+        val builder = SpannableStringBuilder()
+        val matcher = MD_LINK_PATTERN.matcher(text)
+        var lastEnd = 0
+
+        while (matcher.find()) {
+            // 追加匹配前的普通文本
+            val before = text.substring(lastEnd, matcher.start())
+            builder.append(before)
+
+            val displayText = matcher.group(1) ?: ""
+            val url = matcher.group(2) ?: ""
+
+            val spanStart = builder.length
+            builder.append(displayText)
+            val spanEnd = builder.length
+
+            // 设置可点击 Span（蓝色 + 下划线）
+            val clickableSpan = object : ClickableSpan() {
+                override fun onClick(widget: View) {
+                    openLink(url)
+                }
+
+                override fun updateDrawState(ds: android.text.TextPaint) {
+                    super.updateDrawState(ds)
+                    ds.color = 0xFF1565C0.toInt()   // 蓝色
+                    ds.isUnderlineText = true
+                    ds.bgColor = 0x00000000          // 点击时无背景色
                 }
             }
+            builder.setSpan(clickableSpan, spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            // 同时加一层 URLSpan 方便长按复制链接（系统行为）
+            builder.setSpan(URLSpan(url), spanStart, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+
+            lastEnd = matcher.end()
         }
-        return false
+
+        // 追加剩余文本
+        builder.append(text.substring(lastEnd))
+
+        // ✅ 对剩余的裸 URL（非 Markdown 格式）也自动 Linkify
+        tvReadView.text = builder
+        Linkify.addLinks(tvReadView, Linkify.WEB_URLS)
     }
 
     private fun openLink(url: String) {
@@ -157,7 +199,6 @@ class EditActivity : AppCompatActivity() {
         val view = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
         val editSearch = view.findViewById<EditText>(R.id.editSearchApp)
         val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerApps)
-        // ✅ 修复3：加载时显示进度条，给用户反馈
         val progressBar = view.findViewById<ProgressBar>(R.id.progressBarApps)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
@@ -171,7 +212,6 @@ class EditActivity : AppCompatActivity() {
             }
             .create()
 
-        // ✅ 修复4：有缓存直接用，无需等待
         val cached = cachedApps
         if (cached != null) {
             progressBar?.visibility = View.GONE
@@ -180,7 +220,7 @@ class EditActivity : AppCompatActivity() {
             progressBar?.visibility = View.VISIBLE
             Thread {
                 val apps = loadInstalledApps()
-                cachedApps = apps  // 写入缓存
+                cachedApps = apps
                 runOnUiThread {
                     progressBar?.visibility = View.GONE
                     setupAppAdapter(apps, recyclerView, editSearch, dialog)
@@ -191,7 +231,6 @@ class EditActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ✅ 抽取公共方法，避免重复代码
     private fun setupAppAdapter(
         apps: List<AppEntry>,
         recyclerView: RecyclerView,
@@ -221,7 +260,6 @@ class EditActivity : AppCompatActivity() {
         return resolveInfos
             .filter { it.activityInfo.packageName != packageName }
             .distinctBy { it.activityInfo.packageName }
-            // ✅ 修复5：先排序（只用文字，很快），再加载图标（只加载最终去重列表的图标）
             .sortedWith(compareBy(
                 { PinyinUtils.getFirstLetter(it.loadLabel(packageManager).toString()) },
                 { it.loadLabel(packageManager).toString() }
@@ -230,7 +268,7 @@ class EditActivity : AppCompatActivity() {
                 AppEntry(
                     label = info.loadLabel(packageManager).toString(),
                     packageName = info.activityInfo.packageName,
-                    icon = info.loadIcon(packageManager)  // 图标只加载一次
+                    icon = info.loadIcon(packageManager)
                 )
             }
     }
