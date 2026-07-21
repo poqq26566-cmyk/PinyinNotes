@@ -31,9 +31,12 @@ class CategoryActivity : AppCompatActivity() {
 
             val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
             recyclerView.layoutManager = LinearLayoutManager(this)
+
+            // ✅ 创建适配器时传入字数获取回调
             adapter = NoteAdapter(
                 onClick = { note -> openEdit(note) },
-                onLongClick = { note -> showNoteOptions(note) }
+                onLongClick = { note -> showNoteOptions(note) },
+                getWordCount = { note -> getNoteWordCount(note) }  // ✅ 新增
             )
             recyclerView.adapter = adapter
 
@@ -80,6 +83,17 @@ class CategoryActivity : AppCompatActivity() {
                 adapter.submitEntries(notes)
             }
         }.start()
+    }
+
+    // ✅ 获取笔记字数（在子线程中读取，避免卡UI）
+    private fun getNoteWordCount(note: Note): Int {
+        return try {
+            val content = DocStore.getContent(this, note.uri)
+            // 去除空白字符后的长度
+            content.replace(Regex("\\s+"), "").length
+        } catch (e: Exception) {
+            0
+        }
     }
 
     private fun showAddDialog() {
@@ -148,7 +162,6 @@ class CategoryActivity : AppCompatActivity() {
             .show()
     }
 
-    // ✅ 修复：直接复制笔记名称，不读取文件内容
     private fun copyNoteName(note: Note) {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val clip = android.content.ClipData.newPlainText("note_name", note.name)
