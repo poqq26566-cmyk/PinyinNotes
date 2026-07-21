@@ -32,11 +32,10 @@ class CategoryActivity : AppCompatActivity() {
             val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
             recyclerView.layoutManager = LinearLayoutManager(this)
 
-            // ✅ 创建适配器时传入字数获取回调
             adapter = NoteAdapter(
                 onClick = { note -> openEdit(note) },
                 onLongClick = { note -> showNoteOptions(note) },
-                getWordCount = { note -> getNoteWordCount(note) }  // ✅ 新增
+                getWordCount = { note -> getNoteWordCount(note) }
             )
             recyclerView.adapter = adapter
 
@@ -45,7 +44,6 @@ class CategoryActivity : AppCompatActivity() {
                 adapter.getPositionForLetter(letter)
             }
 
-            // 有缓存就先秒开显示，后台再刷新真实数据
             NotesCache.get(categoryUri)?.let {
                 notes = it.toMutableList()
                 adapter.submitEntries(notes)
@@ -85,11 +83,9 @@ class CategoryActivity : AppCompatActivity() {
         }.start()
     }
 
-    // ✅ 获取笔记字数（在子线程中读取，避免卡UI）
     private fun getNoteWordCount(note: Note): Int {
         return try {
             val content = DocStore.getContent(this, note.uri)
-            // 去除空白字符后的长度
             content.replace(Regex("\\s+"), "").length
         } catch (e: Exception) {
             0
