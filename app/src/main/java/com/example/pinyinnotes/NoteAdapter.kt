@@ -13,7 +13,8 @@ private data class EntryListItem<T : NamedItem>(val entry: T) : ListItem()
 /** 通用列表适配器，按拼音首字母分组，用于分类列表和笔记列表 */
 class NoteAdapter<T : NamedItem>(
     private val onClick: (T) -> Unit,
-    private val onLongClick: (T) -> Unit
+    private val onLongClick: (T) -> Unit,
+    private val getWordCount: ((T) -> Int)? = null  // ✅ 新增：获取字数的回调
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<ListItem>()
@@ -57,7 +58,12 @@ class NoteAdapter<T : NamedItem>(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val item = items[position]) {
             is HeaderItem -> (holder as HeaderViewHolder).bind(item.letter)
-            is EntryListItem<*> -> (holder as EntryViewHolder).bind(item.entry as T, onClick, onLongClick)
+            is EntryListItem<*> -> (holder as EntryViewHolder).bind(
+                item.entry as T,
+                onClick,
+                onLongClick,
+                getWordCount
+            )
         }
     }
 
@@ -83,8 +89,29 @@ class NoteAdapter<T : NamedItem>(
 
     class EntryViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val textView: TextView = itemView.findViewById(R.id.tvName)
-        fun <T : NamedItem> bind(entry: T, onClick: (T) -> Unit, onLongClick: (T) -> Unit) {
+        private val tvWordCount: TextView = itemView.findViewById(R.id.tvWordCount)
+
+        fun <T : NamedItem> bind(
+            entry: T,
+            onClick: (T) -> Unit,
+            onLongClick: (T) -> Unit,
+            getWordCount: ((T) -> Int)?
+        ) {
             textView.text = entry.name
+
+            // ✅ 显示字数
+            if (getWordCount != null) {
+                val count = getWordCount(entry)
+                if (count > 0) {
+                    tvWordCount.text = "$count字"
+                    tvWordCount.visibility = View.VISIBLE
+                } else {
+                    tvWordCount.visibility = View.GONE
+                }
+            } else {
+                tvWordCount.visibility = View.GONE
+            }
+
             itemView.setOnClickListener { onClick(entry) }
             itemView.setOnLongClickListener {
                 onLongClick(entry)
