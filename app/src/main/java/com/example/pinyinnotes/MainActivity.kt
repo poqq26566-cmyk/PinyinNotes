@@ -22,6 +22,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: NoteAdapter<Category>
 
     private val prefs by lazy { getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE) }
+    private var passwordDialog: AlertDialog? = null  // ✅ 保存密码弹窗引用
 
     private val folderPicker = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -163,14 +164,24 @@ class MainActivity : AppCompatActivity() {
                 when (KeyManager.unlock(this, uri, password)) {
                     is KeyManager.UnlockResult.Success -> {
                         KeyManager.getKeyBytesOrNull()?.let { VaultKeyCache.save(this, uriStr, it) }
-                        runOnUiThread { onReady() }
+                        runOnUiThread {
+                            // ✅ 密码正确：关闭弹窗
+                            passwordDialog?.dismiss()
+                            passwordDialog = null
+                            onReady()
+                        }
                     }
                     is KeyManager.UnlockResult.WrongPassword -> {
-                        runOnUiThread { onWrongPassword("密码错误，请重试") }
+                        runOnUiThread {
+                            // ✅ 密码错误：弹窗保持打开，显示错误提示
+                            onWrongPassword("密码错误，请重试")
+                        }
                     }
                     is KeyManager.UnlockResult.IoError -> {
                         runOnUiThread {
                             Toast.makeText(this, "读取密钥文件失败，请重新选择文件夹", Toast.LENGTH_LONG).show()
+                            passwordDialog?.dismiss()
+                            passwordDialog = null
                             onCancelled()
                         }
                     }
@@ -179,10 +190,17 @@ class MainActivity : AppCompatActivity() {
                 val ok = KeyManager.createNew(this, uri, password)
                 if (ok) {
                     KeyManager.getKeyBytesOrNull()?.let { VaultKeyCache.save(this, uriStr, it) }
-                    runOnUiThread { onReady() }
+                    runOnUiThread {
+                        // ✅ 创建成功：关闭弹窗
+                        passwordDialog?.dismiss()
+                        passwordDialog = null
+                        onReady()
+                    }
                 } else {
                     runOnUiThread {
                         Toast.makeText(this, "创建密钥失败，请重试", Toast.LENGTH_LONG).show()
+                        passwordDialog?.dismiss()
+                        passwordDialog = null
                         onCancelled()
                     }
                 }
@@ -221,6 +239,9 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("取消") { _, _ -> onCancel() }
             .create()
 
+        // ✅ 保存弹窗引用，供后续关闭使用
+        passwordDialog = dialog
+
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val pwd = editPassword.text.toString()
@@ -245,6 +266,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        // ✅ 添加取消监听，清理引用
+        dialog.setOnCancelListener {
+            passwordDialog = null
+        }
+
         dialog.show()
     }
 
