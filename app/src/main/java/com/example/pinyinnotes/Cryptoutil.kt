@@ -1,27 +1,20 @@
 package com.example.pinyinnotes
 
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Base64
-import java.security.KeyStore
 import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
- * 使用 Android 系统级密钥库（AndroidKeyStore）做 AES-GCM 加密。
- * 密钥由系统在设备的安全硬件（TEE/StrongBox，如果设备支持）里生成和保存，
- * 不写在代码里、不出现在 apk 文件中，反编译也拿不到密钥本身。
- * 不需要用户输入密码，App 自动向系统取用。
+ * AES-GCM 加解密工具。
+ * 密钥来源改为 KeyManager（存在用户选择的 SAF 文件夹里的 _vault.key），
+ * 这样 App 删除重装后，只要选回同一个文件夹密钥就能恢复，数据不会丢失。
  *
- * 兼容旧版本：如果用新密钥解不开（说明是旧版本加密的文件），
- * 会自动尝试用旧版本写死的那把密钥再解一次，保证升级后旧笔记不会打不开。
+ * 兼容旧版本：如果 KeyManager 的密钥解不开，会自动用旧版写死的密钥再试一次，
+ * 保证历史笔记升级后仍能正常打开。
  */
 object CryptoUtil {
 
-    private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
-    private const val KEY_ALIAS = "pinyin_notes_key"
     private const val IV_LEN = 12
     private const val TAG_LEN_BITS = 128
 
@@ -33,28 +26,9 @@ object CryptoUtil {
         0x11, 0x9a.toByte(), 0x3e, 0x58, 0xf0.toByte(), 0x22, 0x87.toByte(), 0x4d
     )
 
-    private fun getOrCreateKey(): SecretKey {
-        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER)
-        keyStore.load(null)
-
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
-
-        val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
-        val spec = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .build()
-        keyGenerator.init(spec)
-        return keyGenerator.generateKey()
-    }
-
     private fun encryptBytes(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        cipher.init(Cipher.ENCRYPT_MODE, KeyManager.getKey())
         val iv = cipher.iv
         val cipherText = cipher.doFinal(plain)
         return iv + cipherText
@@ -64,15 +38,16 @@ object CryptoUtil {
         val iv = data.copyOfRange(0, IV_LEN)
         val cipherText = data.copyOfRange(IV_LEN, data.size)
         return try {
+            // 优先用 KeyManager 的密钥（_vault.key）解密
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(TAG_LEN_BITS, iv))
+            cipher.init(Cipher.DECRYPT_MODE, KeyManager.getKey(), GCMParameterSpec(TAG_LEN_BITS, iv))
             cipher.doFinal(cipherText)
         } catch (e: Exception) {
-            // 新密钥解不开，可能是旧版本加密的文件，用旧密钥再试一次
+            // 解不开则用旧版写死密钥再试（兼容历史笔记）
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(
                 Cipher.DECRYPT_MODE,
-                javax.crypto.spec.SecretKeySpec(LEGACY_KEY, "AES"),
+                SecretKeySpec(LEGACY_KEY, "AES"),
                 GCMParameterSpec(TAG_LEN_BITS, iv)
             )
             cipher.doFinal(cipherText)
