@@ -2,11 +2,11 @@ package com.example.pinyinnotes
 
 import android.content.Intent
 import android.content.pm.ResolveInfo
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.InputFilter
-import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextWatcher
@@ -17,6 +17,7 @@ import android.text.style.URLSpan
 import android.text.util.Linkify
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ProgressBar
@@ -35,8 +36,6 @@ class EditActivity : AppCompatActivity() {
     private lateinit var editText: EditText
     private lateinit var btnToggleMode: ImageButton
     private lateinit var btnChooseApp: ImageButton
-
-    // ✅ 关键修复：引用 ScrollView（父容器），而不是内部 TextView
     private lateinit var scrollReadView: ScrollView
     private lateinit var tvReadView: TextView
 
@@ -46,7 +45,6 @@ class EditActivity : AppCompatActivity() {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
 
-        // Markdown [文字](URL) 正则
         private val MD_LINK_PATTERN: Pattern =
             Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)")
     }
@@ -64,20 +62,44 @@ class EditActivity : AppCompatActivity() {
         null
     }
 
+    // ✅ 键盘监听：键盘弹出时隐藏按钮，键盘收起时恢复
+    private val keyboardListener = ViewTreeObserver.OnGlobalLayoutListener {
+        val rootView = window.decorView.rootView
+        val rect = Rect()
+        rootView.getWindowVisibleDisplayFrame(rect)
+        val screenHeight = rootView.height
+        val keyboardHeight = screenHeight - rect.bottom
+
+        // 键盘高度超过屏幕 15% 则认为键盘弹出
+        val keyboardVisible = keyboardHeight > screenHeight * 0.15
+
+        if (keyboardVisible) {
+            // 打字中：隐藏两个按钮
+            btnToggleMode.visibility = View.GONE
+            btnChooseApp.visibility  = View.GONE
+        } else {
+            // 键盘收起：恢复显示按钮
+            btnToggleMode.visibility = View.VISIBLE
+            btnChooseApp.visibility  = View.VISIBLE
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_edit)
 
-        noteUri = Uri.parse(intent.getStringExtra("note_uri"))
-
-        editText      = findViewById(R.id.editContent)
-        btnToggleMode = findViewById(R.id.btnToggleMode)
-        btnChooseApp  = findViewById(R.id.btnChooseApp)
-        // ✅ 修复：取 ScrollView 的引用
+        noteUri        = Uri.parse(intent.getStringExtra("note_uri"))
+        editText       = findViewById(R.id.editContent)
+        btnToggleMode  = findViewById(R.id.btnToggleMode)
+        btnChooseApp   = findViewById(R.id.btnChooseApp)
         scrollReadView = findViewById(R.id.scrollReadView)
         tvReadView     = findViewById(R.id.tvReadView)
 
-        // 子线程读取内容（含解密），完成后才允许 TextWatcher 触发保存
+        // ✅ 注册键盘监听
+        window.decorView.rootView
+            .viewTreeObserver
+            .addOnGlobalLayoutListener(keyboardListener)
+
         var isLoadingContent = true
         Thread {
             val content = DocStore.getContent(this, noteUri)
@@ -94,7 +116,6 @@ class EditActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {
                 if (isLoadingContent) return
                 DocStore.setContent(this@EditActivity, noteUri, s.toString())
-                // 阅读模式下实时刷新渲染结果
                 if (isReadMode) renderMarkdownLinks(s.toString())
             }
         })
@@ -109,55 +130,52 @@ class EditActivity : AppCompatActivity() {
         applyMode()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        // ✅ 退出时注销监听，防止内存泄漏
+        window.decorView.rootView
+            .viewTreeObserver
+            .removeOnGlobalLayoutListener(keyboardListener)
+    }
+
     private fun applyMode() {
         if (isReadMode) {
-            // ✅ 关键修复：显示 ScrollView（父容器），隐藏 EditText
-            editText.visibility      = View.GONE
+            editText.visibility       = View.GONE
             scrollReadView.visibility = View.VISIBLE
-
             tvReadView.movementMethod = LinkMovementMethod.getInstance()
             renderMarkdownLinks(editText.text.toString())
             btnToggleMode.setImageResource(android.R.drawable.ic_menu_view)
         } else {
-            // ✅ 关键修复：隐藏 ScrollView（父容器），显示 EditText
             scrollReadView.visibility = View.GONE
             editText.visibility       = View.VISIBLE
-
-            editText.filters        = arrayOf()
-            editText.movementMethod = ArrowKeyMovementMethod.getInstance()
+            editText.filters          = arrayOf()
+            editText.movementMethod   = ArrowKeyMovementMethod.getInstance()
             editText.setOnTouchListener(null)
             btnToggleMode.setImageResource(android.R.drawable.ic_menu_edit)
             editText.requestFocus()
         }
     }
 
-    /**
-     * 解析 Markdown [文字](URL) → 可点击蓝色下划线链接
-     * 剩余裸 URL 由 Linkify 自动处理
-     */
     private fun renderMarkdownLinks(text: String) {
         val builder = SpannableStringBuilder()
         val matcher = MD_LINK_PATTERN.matcher(text)
         var lastEnd = 0
 
         while (matcher.find()) {
-            // 先追加匹配前的普通文本
             builder.append(text.substring(lastEnd, matcher.start()))
 
             val displayText = matcher.group(1) ?: ""
             val url         = matcher.group(2) ?: ""
-
-            val spanStart = builder.length
+            val spanStart   = builder.length
             builder.append(displayText)
             val spanEnd = builder.length
 
-            // 设置可点击 Span
             builder.setSpan(
                 object : ClickableSpan() {
                     override fun onClick(widget: View) { openLink(url) }
                     override fun updateDrawState(ds: android.text.TextPaint) {
                         super.updateDrawState(ds)
-                        ds.color          = 0xFF1565C0.toInt()
+                        ds.color           = 0xFF1565C0.toInt()
                         ds.isUnderlineText = true
                     }
                 },
@@ -168,11 +186,8 @@ class EditActivity : AppCompatActivity() {
             lastEnd = matcher.end()
         }
 
-        // 追加剩余文本
         builder.append(text.substring(lastEnd))
-
         tvReadView.text = builder
-        // 对剩余裸 URL 也自动识别
         Linkify.addLinks(tvReadView, Linkify.WEB_URLS)
     }
 
@@ -196,10 +211,10 @@ class EditActivity : AppCompatActivity() {
     }
 
     private fun showAppPickerDialog() {
-        val view        = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
-        val editSearch  = view.findViewById<EditText>(R.id.editSearchApp)
+        val view         = LayoutInflater.from(this).inflate(R.layout.dialog_app_picker, null)
+        val editSearch   = view.findViewById<EditText>(R.id.editSearchApp)
         val recyclerView = view.findViewById<RecyclerView>(R.id.recyclerApps)
-        val progressBar = view.findViewById<ProgressBar>(R.id.progressBarApps)
+        val progressBar  = view.findViewById<ProgressBar>(R.id.progressBarApps)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
         val dialog = AlertDialog.Builder(this)
