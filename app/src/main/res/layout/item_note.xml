@@ -1,13 +1,34 @@
 <?xml version="1.0" encoding="utf-8"?>
-<TextView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/tvName"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
     android:background="?attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true"
     android:paddingStart="16dp"
     android:paddingEnd="16dp"
     android:paddingTop="14dp"
-    android:paddingBottom="14dp"
-    android:textSize="17sp" />
+    android:paddingBottom="14dp">
+
+    <TextView
+        android:id="@+id/tvName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textSize="17sp"
+        android:maxLines="1"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/tvWordCount"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="12sp"
+        android:textColor="#999999"
+        android:layout_marginStart="8dp"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp" />
+
+</LinearLayout>
