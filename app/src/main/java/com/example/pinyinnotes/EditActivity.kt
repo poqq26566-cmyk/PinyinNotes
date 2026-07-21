@@ -51,9 +51,11 @@ class EditActivity : AppCompatActivity() {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
 
-        // ✅ 修复：正则同时支持半角 []() 和全角 〔〕（），允许括号内为空
+        // ✅ 支持中文括号 ［］（） 以及半角括号 []()
+        // 匹配格式：［文字］（URL）或 [文字](URL)
+        // 允许 ] 和 ( 之间有空格
         private val MD_LINK_PATTERN: Pattern =
-            Pattern.compile("[\\[〔]([^\\]〕]+)[\\]〕]\\s*[\\(（]([^)）]*)[\\)）]")
+            Pattern.compile("[\\[［]([^\\]］]+)[\\]］]\\s*[\\(（]([^)）]*)[\\)）]")
     }
 
     // 键盘监听：打字时隐藏按钮，键盘收起时恢复
@@ -181,28 +183,25 @@ class EditActivity : AppCompatActivity() {
     }
 
     /**
-     * 解析 Markdown [文字](URL) → 可点击蓝色下划线链接
-     * ✅ 修复：渲染前将全角括号统一转换为半角，兼容 〔〕（） 写法
-     * ✅ 支持 ] 和 ( 之间有空格的情况，渲染时自动去除空格
-     * ✅ URL为空时只渲染文字，不加点击效果，避免崩溃
+     * 解析 Markdown 链接，支持：
+     * - 半角： [文字](URL)
+     * - 全角： ［文字］（URL）
+     * - 混合： [文字］（URL) 等
+     *
+     * ✅ URL为空时只渲染文字，不加点击效果
      * 剩余裸 URL 由 Linkify 自动处理
      */
     private fun renderMarkdownLinks(text: String) {
-        // ✅ 修复：先把全角括号替换为半角，再交给正则处理
-        val normalized = text
-            .replace('〔', '[').replace('〕', ']')
-            .replace('（', '(').replace('）', ')')
-
         val builder = SpannableStringBuilder()
-        val matcher = MD_LINK_PATTERN.matcher(normalized)
+        val matcher = MD_LINK_PATTERN.matcher(text)
         var lastEnd = 0
 
         while (matcher.find()) {
             // 追加匹配前的普通文本
-            builder.append(normalized.substring(lastEnd, matcher.start()))
+            builder.append(text.substring(lastEnd, matcher.start()))
 
             val displayText = matcher.group(1) ?: ""
-            val url         = (matcher.group(2) ?: "").trim() // URL 去除首尾空格
+            val url         = (matcher.group(2) ?: "").trim()
 
             // ✅ URL为空时只追加文字，不设置点击效果
             if (url.isBlank()) {
@@ -233,7 +232,7 @@ class EditActivity : AppCompatActivity() {
         }
 
         // 追加剩余文本
-        builder.append(normalized.substring(lastEnd))
+        builder.append(text.substring(lastEnd))
 
         tvReadView.text = builder
         // 对剩余裸 URL 也自动识别为可点击链接
@@ -241,7 +240,7 @@ class EditActivity : AppCompatActivity() {
     }
 
     /**
-     * ✅ 修复：增强链接打开逻辑，与 Linkify 行为一致
+     * ✅ 增强链接打开逻辑，支持多种兜底方案
      */
     private fun openLink(url: String) {
         if (url.isBlank()) {
