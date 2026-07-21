@@ -70,6 +70,12 @@ class CategoryActivity : AppCompatActivity() {
 
     private var notes = mutableListOf<Note>()
 
+    /** 每次改动 notes 后统一调用：刷新界面同时同步缓存，避免缓存和真实数据不一致导致点到已删除/改名的旧条目 */
+    private fun commitNotes() {
+        adapter.submitEntries(notes)
+        NotesCache.put(categoryUri, notes)
+    }
+
     private fun refreshList() {
         val repo = repository ?: return
         Thread {
@@ -96,7 +102,7 @@ class CategoryActivity : AppCompatActivity() {
                     val tempNote = Note(name, Uri.EMPTY)
                     notes.add(tempNote)
                     notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                    adapter.submitEntries(notes)
+                    commitNotes()
 
                     Thread {
                         val realNote = repo?.addNote(name)
@@ -108,7 +114,7 @@ class CategoryActivity : AppCompatActivity() {
                                 } else {
                                     notes.removeAt(idx)
                                 }
-                                adapter.submitEntries(notes)
+                                commitNotes()
                             }
                         }
                     }.start()
@@ -124,7 +130,7 @@ class CategoryActivity : AppCompatActivity() {
             .setMessage("删除后无法恢复，确定吗？")
             .setPositiveButton("删除") { _, _ ->
                 notes.removeAll { it.uri == note.uri }
-                adapter.submitEntries(notes)
+                commitNotes()
 
                 val repo = repository
                 Thread {
@@ -173,7 +179,7 @@ class CategoryActivity : AppCompatActivity() {
                         val tempNote = Note(newName, Uri.EMPTY)
                         notes[idx] = tempNote
                         notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                        adapter.submitEntries(notes)
+                        commitNotes()
 
                         Thread {
                             val renamed = repo?.renameNote(oldNote.uri, newName)
@@ -186,7 +192,7 @@ class CategoryActivity : AppCompatActivity() {
                                     android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
                                 }
                                 notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                                adapter.submitEntries(notes)
+                                commitNotes()
                             }
                         }.start()
                     }
