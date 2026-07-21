@@ -1,5 +1,6 @@
 package com.example.pinyinnotes
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ResolveInfo
 import android.graphics.Rect
@@ -44,9 +45,9 @@ class EditActivity : AppCompatActivity() {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
 
-        // ✅ 修复空格问题：] 和 ( 之间允许有任意空白符 \s*
+        // ✅ 修复1：正则改为 [^)]* 允许括号内为空，覆盖空URL情况
         private val MD_LINK_PATTERN: Pattern =
-            Pattern.compile("\\[([^\\]]+)\\]\\s*\\(([^)]+)\\)")
+            Pattern.compile("\\[([^\\]]+)\\]\\s*\\(([^)]*)\\)")
     }
 
     private val protectLinkFilter = InputFilter { _, _, _, dest, dstart, dend ->
@@ -62,12 +63,12 @@ class EditActivity : AppCompatActivity() {
         null
     }
 
-    // ✅ 键盘监听：打字时隐藏按钮，键盘收起时恢复
+    // 键盘监听：打字时隐藏按钮，键盘收起时恢复
     private val keyboardListener = ViewTreeObserver.OnGlobalLayoutListener {
         val rootView = window.decorView.rootView
         val rect = Rect()
         rootView.getWindowVisibleDisplayFrame(rect)
-        val screenHeight  = rootView.height
+        val screenHeight   = rootView.height
         val keyboardHeight = screenHeight - rect.bottom
         val keyboardVisible = keyboardHeight > screenHeight * 0.15
 
@@ -159,6 +160,7 @@ class EditActivity : AppCompatActivity() {
     /**
      * 解析 Markdown [文字](URL) → 可点击蓝色下划线链接
      * ✅ 支持 ] 和 ( 之间有空格的情况，渲染时自动去除空格
+     * ✅ 修复2：URL为空时只渲染文字，不加点击效果，避免崩溃
      * 剩余裸 URL 由 Linkify 自动处理
      */
     private fun renderMarkdownLinks(text: String) {
@@ -172,6 +174,13 @@ class EditActivity : AppCompatActivity() {
 
             val displayText = matcher.group(1) ?: ""
             val url         = (matcher.group(2) ?: "").trim() // URL 去除首尾空格
+
+            // ✅ 修复2：URL为空时只追加文字，不设置点击效果
+            if (url.isBlank()) {
+                builder.append(displayText)
+                lastEnd = matcher.end()
+                continue
+            }
 
             val spanStart = builder.length
             builder.append(displayText)
@@ -203,6 +212,12 @@ class EditActivity : AppCompatActivity() {
     }
 
     private fun openLink(url: String) {
+        // ✅ 修复3：URL为空时直接返回，不尝试启动 Intent
+        if (url.isBlank()) {
+            Toast.makeText(this, "链接地址为空", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         val preferredPackage = LinkAppPreference.get(this, noteUri)
         if (preferredPackage != null) {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -218,7 +233,13 @@ class EditActivity : AppCompatActivity() {
                 }
             }
         }
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+        // ✅ 修复4：兜底 startActivity 加 try-catch，防止系统没有任何 App 能处理该链接
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "没有找到可以打开此链接的应用", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun showAppPickerDialog() {
