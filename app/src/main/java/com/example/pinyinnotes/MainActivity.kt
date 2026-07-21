@@ -4,8 +4,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
+import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -30,23 +32,21 @@ class MainActivity : AppCompatActivity() {
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-            // 先在子线程初始化密钥，成功后再创建 repository
-            Thread {
-                val ok = KeyManager.loadOrCreate(this, uri)
-                runOnUiThread {
-                    if (ok) {
-                        prefs.edit().putString("tree_uri", uri.toString()).apply()
-                        try {
-                            categoryRepository = CategoryRepository(this, uri)
-                            refreshList()
-                        } catch (e: Exception) {
-                            Toast.makeText(this, "文件夹初始化失败，请重试", Toast.LENGTH_LONG).show()
-                        }
-                    } else {
-                        Toast.makeText(this, "密钥初始化失败，请重新选择文件夹", Toast.LENGTH_LONG).show()
+            ensureVaultUnlocked(
+                uri = uri,
+                onReady = {
+                    prefs.edit().putString("tree_uri", uri.toString()).apply()
+                    try {
+                        categoryRepository = CategoryRepository(this, uri)
+                        refreshList()
+                    } catch (e: Exception) {
+                        Toast.makeText(this, "文件夹初始化失败，请重试", Toast.LENGTH_LONG).show()
                     }
+                },
+                onCancelled = {
+                    Toast.makeText(this, "需要密码才能使用该文件夹", Toast.LENGTH_LONG).show()
                 }
-            }.start()
+            )
         } else {
             Toast.makeText(this, "需要选择一个文件夹才能使用", Toast.LENGTH_LONG).show()
         }
@@ -77,27 +77,24 @@ class MainActivity : AppCompatActivity() {
         val btnCheckDuplicate: android.widget.Button = findViewById(R.id.btnCheckDuplicate)
         btnCheckDuplicate.setOnClickListener { checkDuplicates() }
 
-        // 启动时读取上次保存的文件夹，先加载密钥再初始化 repository
+        // 启动时读取上次保存的文件夹：优先用本机免密缓存直接解锁，
+        // 没有缓存（比如刚装完 App 第一次配合旧文件夹，或缓存被清）才弹密码框
         val savedUri = prefs.getString("tree_uri", null)
         if (savedUri != null) {
-            Thread {
-                val uri = Uri.parse(savedUri)
-                val ok = KeyManager.loadOrCreate(this, uri)
-                runOnUiThread {
-                    if (ok) {
-                        try {
-                            categoryRepository = CategoryRepository(this, uri)
-                            refreshList()
-                        } catch (e: Exception) {
-                            categoryRepository = null
-                            pickFolder()
-                        }
-                    } else {
-                        // 密钥文件读取失败（可能权限失效），重新选文件夹
+            val uri = Uri.parse(savedUri)
+            ensureVaultUnlocked(
+                uri = uri,
+                onReady = {
+                    try {
+                        categoryRepository = CategoryRepository(this, uri)
+                        refreshList()
+                    } catch (e: Exception) {
+                        categoryRepository = null
                         pickFolder()
                     }
-                }
-            }.start()
+                },
+                onCancelled = { pickFolder() }
+            )
         } else {
             pickFolder()
         }
@@ -118,6 +115,140 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "请选择/新建 Vault/拼音笔记 文件夹", Toast.LENGTH_LONG).show()
         folderPicker.launch(intent)
     }
+
+    // ---------------------------------------------------------------------
+    // 密钥解锁：先查本机免密缓存，没有才弹密码框；成功后写入缓存供下次冷启动跳过
+    // ---------------------------------------------------------------------
+
+    /**
+     * 解锁（或首次创建）指定文件夹的密钥。
+     * 全部完成后在主线程回调 onReady()；用户主动取消密码框则回调 onCancelled()。
+     */
+    private fun ensureVaultUnlocked(uri: Uri, onReady: () -> Unit, onCancelled: () -> Unit) {
+        val uriStr = uri.toString()
+        Thread {
+            // 1. 优先用本机 Keystore 缓存，免密解锁
+            val cachedBytes = VaultKeyCache.load(this, uriStr)
+            if (cachedBytes != null) {
+                KeyManager.restoreFromCachedBytes(cachedBytes)
+                runOnUiThread { onReady() }
+                return@Thread
+            }
+
+            // 2. 没有缓存：判断这个文件夹是不是第一次使用，决定弹"设置密码"还是"输入密码"
+            val exists = KeyManager.vaultExists(this, uri)
+            runOnUiThread {
+                promptPassword(
+                    isNewVault = !exists,
+                    onSubmit = { password, onWrongPassword ->
+                        unlockWithPassword(uri, uriStr, exists, password, onReady, onWrongPassword, onCancelled)
+                    },
+                    onCancel = onCancelled
+                )
+            }
+        }.start()
+    }
+
+    private fun unlockWithPassword(
+        uri: Uri,
+        uriStr: String,
+        exists: Boolean,
+        password: String,
+        onReady: () -> Unit,
+        onWrongPassword: (String) -> Unit,
+        onCancelled: () -> Unit
+    ) {
+        Thread {
+            if (exists) {
+                when (KeyManager.unlock(this, uri, password)) {
+                    is KeyManager.UnlockResult.Success -> {
+                        KeyManager.getKeyBytesOrNull()?.let { VaultKeyCache.save(this, uriStr, it) }
+                        runOnUiThread { onReady() }
+                    }
+                    is KeyManager.UnlockResult.WrongPassword -> {
+                        runOnUiThread { onWrongPassword("密码错误，请重试") }
+                    }
+                    is KeyManager.UnlockResult.IoError -> {
+                        runOnUiThread {
+                            Toast.makeText(this, "读取密钥文件失败，请重新选择文件夹", Toast.LENGTH_LONG).show()
+                            onCancelled()
+                        }
+                    }
+                }
+            } else {
+                val ok = KeyManager.createNew(this, uri, password)
+                if (ok) {
+                    KeyManager.getKeyBytesOrNull()?.let { VaultKeyCache.save(this, uriStr, it) }
+                    runOnUiThread { onReady() }
+                } else {
+                    runOnUiThread {
+                        Toast.makeText(this, "创建密钥失败，请重试", Toast.LENGTH_LONG).show()
+                        onCancelled()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    /**
+     * 弹出密码输入框。
+     * isNewVault=true：首次设置密码（需要二次确认）；false：输入密码解锁。
+     * onSubmit 的第二个参数用来在密码错误时显示错误提示，并让对话框继续留着重试。
+     */
+    private fun promptPassword(
+        isNewVault: Boolean,
+        onSubmit: (password: String, onWrongPassword: (String) -> Unit) -> Unit,
+        onCancel: () -> Unit
+    ) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_password, null)
+        val tvHint = view.findViewById<TextView>(R.id.tvHint)
+        val editPassword = view.findViewById<EditText>(R.id.editPassword)
+        val editConfirm = view.findViewById<EditText>(R.id.editConfirmPassword)
+        val tvError = view.findViewById<TextView>(R.id.tvError)
+
+        tvHint.text = if (isNewVault) {
+            "首次使用，请设置一个密码。以后同一台设备无需再次输入；请务必记住，密码丢失将无法恢复笔记。"
+        } else {
+            "请输入密码解锁"
+        }
+        editConfirm.visibility = if (isNewVault) View.VISIBLE else View.GONE
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(if (isNewVault) "设置密码" else "输入密码")
+            .setView(view)
+            .setCancelable(false)
+            .setPositiveButton("确定", null) // 先传 null，show() 后手动接管，避免密码错误时自动关闭
+            .setNegativeButton("取消") { _, _ -> onCancel() }
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val pwd = editPassword.text.toString()
+                if (pwd.isEmpty()) {
+                    tvError.text = "密码不能为空"
+                    tvError.visibility = View.VISIBLE
+                    return@setOnClickListener
+                }
+                if (isNewVault && pwd != editConfirm.text.toString()) {
+                    tvError.text = "两次输入的密码不一致"
+                    tvError.visibility = View.VISIBLE
+                    return@setOnClickListener
+                }
+                tvError.visibility = View.GONE
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                onSubmit(pwd) { errorMsg ->
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                    tvError.text = errorMsg
+                    tvError.visibility = View.VISIBLE
+                    editPassword.text.clear()
+                    editPassword.requestFocus()
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    // ---------------------------------------------------------------------
 
     private var categories = mutableListOf<Category>()
 
