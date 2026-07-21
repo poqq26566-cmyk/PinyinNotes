@@ -17,9 +17,10 @@ android {
 
     buildTypes {
         debug {
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // ✅ debug 包不混淆：App.kt 里的崩溃反馈机制会把堆栈显示给用户，
+            // 混淆后类名/行号看不懂，不利于定位问题；release 不受影响。
+            minifyEnabled false
+            shrinkResources false
         }
         release {
             minifyEnabled true
