@@ -240,35 +240,73 @@ class EditActivity : AppCompatActivity() {
         Linkify.addLinks(tvReadView, Linkify.WEB_URLS)
     }
 
+    /**
+     * ✅ 修复：增强链接打开逻辑，与 Linkify 行为一致
+     */
     private fun openLink(url: String) {
-        // ✅ URL为空时直接返回，不尝试启动 Intent
         if (url.isBlank()) {
             Toast.makeText(this, "链接地址为空", Toast.LENGTH_SHORT).show()
             return
         }
 
+        // ✅ 强制添加 http:// 前缀（如果没有的话），与 Linkify 行为一致
+        var finalUrl = url
+        if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
+            finalUrl = "http://$finalUrl"
+        }
+
         val preferredPackage = LinkAppPreference.get(this, noteUri)
         if (preferredPackage != null) {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
             intent.setPackage(preferredPackage)
             try {
                 startActivity(intent)
                 return
             } catch (e: Exception) {
-                val launchIntent = packageManager.getLaunchIntentForPackage(preferredPackage)
-                if (launchIntent != null) {
-                    startActivity(launchIntent)
-                    return
-                }
+                // 选的应用打不开，继续走兜底
             }
         }
 
-        // ✅ 兜底 startActivity 加 try-catch，防止系统没有任何 App 能处理该链接
+        // ✅ 兜底方案1：用和 Linkify 一样的方式（添加 CATEGORY_BROWSABLE）
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
+            intent.addCategory(Intent.CATEGORY_BROWSABLE)
+            startActivity(intent)
+            return
         } catch (e: ActivityNotFoundException) {
-            Toast.makeText(this, "没有找到可以打开此链接的应用", Toast.LENGTH_SHORT).show()
+            // 继续尝试下一个方案
         }
+
+        // ✅ 兜底方案2：不加 CATEGORY_BROWSABLE，直接打开
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl)))
+            return
+        } catch (e: ActivityNotFoundException) {
+            // 继续尝试下一个方案
+        }
+
+        // ✅ 兜底方案3：尝试用 Chrome 强制打开
+        try {
+            val chromeIntent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
+            chromeIntent.setPackage("com.android.chrome")
+            startActivity(chromeIntent)
+            return
+        } catch (e: Exception) {
+            // Chrome 没有，继续
+        }
+
+        // ✅ 兜底方案4：尝试用 Edge 强制打开
+        try {
+            val edgeIntent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
+            edgeIntent.setPackage("com.microsoft.emmx")
+            startActivity(edgeIntent)
+            return
+        } catch (e: Exception) {
+            // Edge 没有，继续
+        }
+
+        // ✅ 全部失败，提示用户
+        Toast.makeText(this, "没有找到可以打开此链接的应用", Toast.LENGTH_SHORT).show()
     }
 
     private fun showAppPickerDialog() {
