@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ProgressBar
@@ -224,6 +225,8 @@ class MainActivity : AppCompatActivity() {
         val editPassword = view.findViewById<EditText>(R.id.editPassword)
         val editConfirm = view.findViewById<EditText>(R.id.editConfirmPassword)
         val tvError = view.findViewById<TextView>(R.id.tvError)
+
+        // ✅ 创建 ProgressBar 并添加到布局
         val progressBar = ProgressBar(view.context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -232,9 +235,10 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
-        // ✅ 把 ProgressBar 添加到对话框布局中
-        val container = view as? ViewGroup
-        container?.addView(progressBar)
+        // ✅ 安全地添加 ProgressBar 到容器
+        if (view is ViewGroup) {
+            view.addView(progressBar)
+        }
 
         tvHint.text = if (isNewVault) {
             "首次使用，请设置一个密码。以后同一台设备无需再次输入；请务必记住，密码丢失将无法恢复笔记。"
@@ -274,7 +278,7 @@ class MainActivity : AppCompatActivity() {
 
                 // ✅ 清除错误，隐藏确定按钮，显示加载进度
                 tvError.visibility = View.GONE
-                positiveButton.visibility = View.GONE  // 直接隐藏确定按钮，而不是变灰
+                positiveButton.visibility = View.GONE  // 直接隐藏确定按钮
                 progressBar.visibility = View.VISIBLE
                 editPassword.isEnabled = false
                 editConfirm.isEnabled = false
