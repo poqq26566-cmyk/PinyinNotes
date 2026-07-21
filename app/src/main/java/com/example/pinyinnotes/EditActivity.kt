@@ -51,9 +51,9 @@ class EditActivity : AppCompatActivity() {
         @Volatile
         private var cachedApps: List<AppEntry>? = null
 
-        // ✅ 修复1：正则改为 [^)]* 允许括号内为空，覆盖空URL情况
+        // ✅ 修复：正则同时支持半角 []() 和全角 〔〕（），允许括号内为空
         private val MD_LINK_PATTERN: Pattern =
-            Pattern.compile("\\[([^\\]]+)\\]\\s*\\(([^)]*)\\)")
+            Pattern.compile("[\\[〔]([^\\]〕]+)[\\]〕]\\s*[\\(（]([^)）]*)[\\)）]")
     }
 
     // 键盘监听：打字时隐藏按钮，键盘收起时恢复
@@ -182,23 +182,29 @@ class EditActivity : AppCompatActivity() {
 
     /**
      * 解析 Markdown [文字](URL) → 可点击蓝色下划线链接
+     * ✅ 修复：渲染前将全角括号统一转换为半角，兼容 〔〕（） 写法
      * ✅ 支持 ] 和 ( 之间有空格的情况，渲染时自动去除空格
-     * ✅ 修复2：URL为空时只渲染文字，不加点击效果，避免崩溃
+     * ✅ URL为空时只渲染文字，不加点击效果，避免崩溃
      * 剩余裸 URL 由 Linkify 自动处理
      */
     private fun renderMarkdownLinks(text: String) {
+        // ✅ 修复：先把全角括号替换为半角，再交给正则处理
+        val normalized = text
+            .replace('〔', '[').replace('〕', ']')
+            .replace('（', '(').replace('）', ')')
+
         val builder = SpannableStringBuilder()
-        val matcher = MD_LINK_PATTERN.matcher(text)
+        val matcher = MD_LINK_PATTERN.matcher(normalized)
         var lastEnd = 0
 
         while (matcher.find()) {
             // 追加匹配前的普通文本
-            builder.append(text.substring(lastEnd, matcher.start()))
+            builder.append(normalized.substring(lastEnd, matcher.start()))
 
             val displayText = matcher.group(1) ?: ""
             val url         = (matcher.group(2) ?: "").trim() // URL 去除首尾空格
 
-            // ✅ 修复2：URL为空时只追加文字，不设置点击效果
+            // ✅ URL为空时只追加文字，不设置点击效果
             if (url.isBlank()) {
                 builder.append(displayText)
                 lastEnd = matcher.end()
@@ -227,7 +233,7 @@ class EditActivity : AppCompatActivity() {
         }
 
         // 追加剩余文本
-        builder.append(text.substring(lastEnd))
+        builder.append(normalized.substring(lastEnd))
 
         tvReadView.text = builder
         // 对剩余裸 URL 也自动识别为可点击链接
@@ -235,7 +241,7 @@ class EditActivity : AppCompatActivity() {
     }
 
     private fun openLink(url: String) {
-        // ✅ 修复3：URL为空时直接返回，不尝试启动 Intent
+        // ✅ URL为空时直接返回，不尝试启动 Intent
         if (url.isBlank()) {
             Toast.makeText(this, "链接地址为空", Toast.LENGTH_SHORT).show()
             return
@@ -257,7 +263,7 @@ class EditActivity : AppCompatActivity() {
             }
         }
 
-        // ✅ 修复4：兜底 startActivity 加 try-catch，防止系统没有任何 App 能处理该链接
+        // ✅ 兜底 startActivity 加 try-catch，防止系统没有任何 App 能处理该链接
         try {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         } catch (e: ActivityNotFoundException) {
