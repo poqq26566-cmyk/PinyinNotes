@@ -7,6 +7,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -173,7 +174,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     is KeyManager.UnlockResult.WrongPassword -> {
                         runOnUiThread {
-                            // ✅ 密码错误：弹窗保持打开，显示错误提示
+                            // ✅ 密码错误：恢复按钮和输入框状态
                             onWrongPassword("密码错误，请重试")
                         }
                     }
@@ -223,6 +224,17 @@ class MainActivity : AppCompatActivity() {
         val editPassword = view.findViewById<EditText>(R.id.editPassword)
         val editConfirm = view.findViewById<EditText>(R.id.editConfirmPassword)
         val tvError = view.findViewById<TextView>(R.id.tvError)
+        val progressBar = ProgressBar(view.context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            visibility = View.GONE
+        }
+
+        // ✅ 把 ProgressBar 添加到对话框布局中
+        val container = view as? ViewGroup
+        container?.addView(progressBar)
 
         tvHint.text = if (isNewVault) {
             "首次使用，请设置一个密码。以后同一台设备无需再次输入；请务必记住，密码丢失将无法恢复笔记。"
@@ -235,15 +247,19 @@ class MainActivity : AppCompatActivity() {
             .setTitle(if (isNewVault) "设置密码" else "输入密码")
             .setView(view)
             .setCancelable(false)
-            .setPositiveButton("确定", null) // 先传 null，show() 后手动接管，避免密码错误时自动关闭
-            .setNegativeButton("取消") { _, _ -> onCancel() }
+            .setPositiveButton("确定", null)
+            .setNegativeButton("取消") { _, _ ->
+                progressBar.visibility = View.GONE
+                onCancel()
+            }
             .create()
 
-        // ✅ 保存弹窗引用，供后续关闭使用
+        // ✅ 保存弹窗引用
         passwordDialog = dialog
 
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val positiveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            positiveButton.setOnClickListener {
                 val pwd = editPassword.text.toString()
                 if (pwd.isEmpty()) {
                     tvError.text = "密码不能为空"
@@ -255,10 +271,20 @@ class MainActivity : AppCompatActivity() {
                     tvError.visibility = View.VISIBLE
                     return@setOnClickListener
                 }
+
+                // ✅ 清除错误，隐藏确定按钮，显示加载进度
                 tvError.visibility = View.GONE
-                dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                positiveButton.visibility = View.GONE  // 直接隐藏确定按钮，而不是变灰
+                progressBar.visibility = View.VISIBLE
+                editPassword.isEnabled = false
+                editConfirm.isEnabled = false
+
                 onSubmit(pwd) { errorMsg ->
-                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
+                    // ✅ 密码错误：恢复界面
+                    positiveButton.visibility = View.VISIBLE
+                    progressBar.visibility = View.GONE
+                    editPassword.isEnabled = true
+                    editConfirm.isEnabled = true
                     tvError.text = errorMsg
                     tvError.visibility = View.VISIBLE
                     editPassword.text.clear()
@@ -267,7 +293,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // ✅ 添加取消监听，清理引用
         dialog.setOnCancelListener {
             passwordDialog = null
         }
