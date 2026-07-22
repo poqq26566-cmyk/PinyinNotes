@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
         }
         val previewView = TextView(this).apply {
-            text = "${text.take(150)}${if (text.length > 150) "..." else ""}"
+            this.text = "${text.take(150)}${if (text.length > 150) "..." else ""}"
             setPadding(48, 24, 48, 24)
         }
         val listView = ListView(this).apply {
@@ -607,4 +607,3 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 }
-                     
