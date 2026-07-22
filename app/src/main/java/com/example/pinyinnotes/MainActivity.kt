@@ -148,14 +148,11 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        if (categories.isEmpty()) {
-            Toast.makeText(this, "请先创建分类", Toast.LENGTH_SHORT).show()
-            return
-        }
-
         // ✅ 用自定义布局同时展示"内容预览"和"分类列表"
         // （AlertDialog 的 setMessage 和 setItems 内容区互斥，同时用会导致列表被隐藏）
-        val categoryNames = categories.map { it.name }
+        // 列表第一项固定是"➕ 新建分类"，分类为空时也能直接在这里新建，不用再单独跳出去
+        val NEW_CATEGORY_LABEL = "➕ 新建分类"
+        val listLabels = listOf(NEW_CATEGORY_LABEL) + categories.map { it.name }
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
@@ -164,7 +161,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(48, 24, 48, 24)
         }
         val listView = ListView(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, categoryNames)
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, listLabels)
         }
         container.addView(previewView)
         container.addView(listView)
@@ -176,8 +173,13 @@ class MainActivity : AppCompatActivity() {
             .create()
 
         listView.setOnItemClickListener { _, _, position, _ ->
+            if (position == 0) {
+                // 新建分类：先建好分类，成功后再用它保存笔记，并关掉本对话框
+                showCreateCategoryThenSaveDialog(text, dialog)
+                return@setOnItemClickListener
+            }
             dialog.dismiss()
-            saveSharedTextToNewNote(text, categories[position])
+            saveSharedTextToNewNote(text, categories[position - 1])
         }
 
         dialog.show()
@@ -407,18 +409,46 @@ class MainActivity : AppCompatActivity() {
 
     // ---------------------------------------------------------------------
 
-    private val categories = mutableListOf<Category>()
+    private var categories = mutableListOf<Category>()
 
     private fun refreshList() {
         val repo = categoryRepository ?: return
         Thread {
             val list = repo.getAllCategories()
             runOnUiThread {
-                categories.clear()
-                categories.addAll(list)
+                categories = list.toMutableList()
                 adapter.submitEntries(categories)
             }
         }.start()
+    }
+
+    private fun showCreateCategoryThenSaveDialog(text: String, parentDialog: AlertDialog) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        AlertDialog.Builder(this)
+            .setTitle("新建分类")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
+                val name = editText.text.toString().trim()
+                if (name.isEmpty()) return@setPositiveButton
+                val repo = categoryRepository
+                Thread {
+                    val realCategory = repo?.addCategory(name)
+                    runOnUiThread {
+                        if (realCategory != null) {
+                            categories.add(realCategory)
+                            categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                            adapter.submitEntries(categories)
+                            parentDialog.dismiss()
+                            saveSharedTextToNewNote(text, realCategory)
+                        } else {
+                            Toast.makeText(this, "新建分类失败", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun showAddCategoryDialog() {
@@ -436,7 +466,7 @@ class MainActivity : AppCompatActivity() {
                     val tempCategory = Category(name, Uri.EMPTY)
                     categories.add(tempCategory)
                     categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
-                    adapter.submitEntries(categories.toList())
+                    adapter.submitEntries(categories)
 
                     Thread {
                         val realCategory = repo?.addCategory(name)
@@ -448,7 +478,7 @@ class MainActivity : AppCompatActivity() {
                                 } else {
                                     categories.removeAt(idx)
                                 }
-                                adapter.submitEntries(categories.toList())
+                                adapter.submitEntries(categories)
                             }
                         }
                     }.start()
@@ -577,3 +607,4 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 }
+                     
