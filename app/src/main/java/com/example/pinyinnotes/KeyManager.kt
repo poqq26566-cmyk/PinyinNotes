@@ -196,4 +196,12 @@ object KeyManager {
     fun getKeyBytesOrNull(): ByteArray? = cachedKey?.encoded
     fun restoreFromCachedBytes(bytes: ByteArray) { cachedKey = SecretKeySpec(bytes, "AES") }
     fun clear() { cachedKey = null }
+
+    // ✅ 新增：确保密钥就绪（优先用缓存，返回 true 表示就绪）
+    fun ensureReady(context: Context, treeUri: Uri): Boolean {
+        if (isReady()) return true
+        val cachedBytes = VaultKeyCache.load(context, treeUri.toString()) ?: return false
+        restoreFromCachedBytes(cachedBytes)
+        return true
+    }
 }
