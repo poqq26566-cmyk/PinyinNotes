@@ -3,6 +3,8 @@ package com.example.pinyinnotes
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -14,6 +16,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
@@ -25,6 +28,8 @@ class MainActivity : AppCompatActivity() {
 
     private val prefs by lazy { getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE) }
     private var passwordDialog: AlertDialog? = null  // ✅ 保存密码弹窗引用
+
+    private val handler = Handler(Looper.getMainLooper())
 
     private val folderPicker = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -101,12 +106,90 @@ class MainActivity : AppCompatActivity() {
         } else {
             pickFolder()
         }
+
+        // ✅ 处理分享进来的内容
+        handleShareIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent != null) {
+            setIntent(intent)
+            handleShareIntent(intent)
+        }
     }
 
     override fun onResume() {
         super.onResume()
         refreshList()
     }
+
+    // ===================== ✅ 接收分享 =====================
+
+    private fun handleShareIntent(intent: Intent) {
+        if (intent.action != Intent.ACTION_SEND) return
+        if (intent.type != "text/plain") return
+
+        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+        if (sharedText.isNullOrEmpty()) return
+
+        // 延迟一下等界面加载完
+        handler.postDelayed({
+            showSaveSharedTextDialog(sharedText)
+        }, 500)
+    }
+
+    private fun showSaveSharedTextDialog(text: String) {
+        AlertDialog.Builder(this)
+            .setTitle("📥 接收到分享内容")
+            .setMessage("是否保存到笔记？\n\n${text.take(200)}${if (text.length > 200) "..." else ""}")
+            .setPositiveButton("保存到新笔记") { _, _ ->
+                saveSharedTextToNewNote(text)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun saveSharedTextToNewNote(text: String) {
+        if (categoryRepository == null) {
+            Toast.makeText(this, "请先解锁并选择文件夹", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (categories.isEmpty()) {
+            Toast.makeText(this, "请先创建分类", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val targetCategory = categories.first()
+        val noteName = "分享_${System.currentTimeMillis() / 1000}"
+
+        Toast.makeText(this, "正在保存...", Toast.LENGTH_SHORT).show()
+
+        Thread {
+            try {
+                val categoryDoc = DocumentFile.fromTreeUri(this, targetCategory.uri)
+                if (categoryDoc != null) {
+                    val repo = NoteRepository(this, categoryDoc)
+                    val note = repo.addNote(noteName)
+                    if (note != null) {
+                        DocStore.setContent(this, note.uri, text)
+                        runOnUiThread {
+                            Toast.makeText(this, "✅ 已保存到「${targetCategory.name}」", Toast.LENGTH_LONG).show()
+                            // 刷新列表
+                            refreshList()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    // ===================== 原有代码 =====================
 
     private fun pickFolder() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
@@ -118,10 +201,6 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "请选择/新建 Vault/拼音笔记 文件夹", Toast.LENGTH_LONG).show()
         folderPicker.launch(intent)
     }
-
-    // ---------------------------------------------------------------------
-    // 密钥解锁：先查本机免密缓存，没有才弹密码框；成功后写入缓存供下次冷启动跳过
-    // ---------------------------------------------------------------------
 
     /**
      * 解锁（或首次创建）指定文件夹的密钥。
@@ -440,7 +519,7 @@ class MainActivity : AppCompatActivity() {
 
             for (category in snapshot) {
                 try {
-                    val folderDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, category.uri)
+                    val folderDoc = DocumentFile.fromTreeUri(this, category.uri)
                         ?: continue
                     val noteRepo = NoteRepository(this, folderDoc)
                     val dupNotes = noteRepo.getAllNotes().groupBy { it.name }.filter { it.value.size > 1 }
@@ -475,3 +554,4 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 }
+                     
