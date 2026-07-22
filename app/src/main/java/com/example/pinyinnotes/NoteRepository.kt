@@ -15,7 +15,7 @@ class NoteRepository(private val context: Context, private val folderDoc: Docume
                 try {
                     val encoded = file.name!!.removeSuffix(EXT)
                     val displayName = CryptoUtil.decryptFileName(encoded)
-                    Note(displayName, file.uri)
+                    Note(displayName, file.uri, file.lastModified())
                 } catch (e: Exception) {
                     null
                 }
@@ -27,7 +27,7 @@ class NoteRepository(private val context: Context, private val folderDoc: Docume
         val fileName = CryptoUtil.encryptToFileName(name) + EXT
         val file = folderDoc.createFile("application/octet-stream", fileName) ?: return null
         DocStore.setContent(context, file.uri, "")
-        return Note(name, file.uri)
+        return Note(name, file.uri, file.lastModified())
     }
 
     fun deleteNote(uri: android.net.Uri) {
