@@ -20,6 +20,10 @@ class CategoryActivity : AppCompatActivity() {
     private lateinit var adapter: NoteAdapter<Note>
     private var categoryUri: Uri = Uri.EMPTY
 
+    // ✅ 字数缓存：避免每次滑动都解密读取
+    private var notes = mutableListOf<Note>()
+    private val wordCounts = mutableMapOf<Uri, Int>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -33,10 +37,11 @@ class CategoryActivity : AppCompatActivity() {
             val recyclerView: RecyclerView = findViewById(R.id.recyclerView)
             recyclerView.layoutManager = LinearLayoutManager(this)
 
+            // ✅ getWordCount 只查 Map，零 I/O
             adapter = NoteAdapter(
                 onClick = { note -> openEdit(note) },
                 onLongClick = { note -> showNoteOptions(note) },
-                getWordCount = { note -> getNoteWordCount(note) }
+                getWordCount = { note -> wordCounts[note.uri] ?: 0 }
             )
             recyclerView.adapter = adapter
 
@@ -45,6 +50,7 @@ class CategoryActivity : AppCompatActivity() {
                 adapter.getPositionForLetter(letter)
             }
 
+            // 有缓存就先秒开显示，后台再刷新真实数据 + 字数
             NotesCache.get(categoryUri)?.let {
                 notes = it.toMutableList()
                 adapter.submitEntries(notes)
@@ -70,33 +76,36 @@ class CategoryActivity : AppCompatActivity() {
         refreshList()
     }
 
-    private var notes = mutableListOf<Note>()
-
+    // ✅ 后台批量计算字数，只做一次 I/O
     private fun refreshList() {
         val repo = repository ?: return
         Thread {
             val list = repo.getAllNotes()
             NotesCache.put(categoryUri, list)
+
+            val counts = mutableMapOf<Uri, Int>()
+            for (note in list) {
+                counts[note.uri] = try {
+                    val content = DocStore.getContent(this, note.uri)
+                    content.replace(Regex("\\s+"), "").length
+                } catch (e: IllegalStateException) {
+                    // 密钥未就绪
+                    runOnUiThread {
+                        Toast.makeText(this, "密钥未就绪，请返回重新解锁", Toast.LENGTH_SHORT).show()
+                    }
+                    0
+                } catch (e: Exception) {
+                    0
+                }
+            }
+
             runOnUiThread {
                 notes = list.toMutableList()
+                wordCounts.clear()
+                wordCounts.putAll(counts)
                 adapter.submitEntries(notes)
             }
         }.start()
-    }
-
-    private fun getNoteWordCount(note: Note): Int {
-        return try {
-            val content = DocStore.getContent(this, note.uri)
-            content.replace(Regex("\\s+"), "").length
-        } catch (e: IllegalStateException) {
-            // 密钥未就绪，返回 0 并提示
-            runOnUiThread {
-                Toast.makeText(this, "密钥未就绪，请返回重新解锁", Toast.LENGTH_SHORT).show()
-            }
-            0
-        } catch (e: Exception) {
-            0
-        }
     }
 
     private fun showAddDialog() {
@@ -127,6 +136,8 @@ class CategoryActivity : AppCompatActivity() {
                                 }
                                 adapter.submitEntries(notes)
                             }
+                            // ✅ 新增后刷新字数
+                            refreshList()
                         }
                     }.start()
                 }
@@ -141,6 +152,7 @@ class CategoryActivity : AppCompatActivity() {
             .setMessage("删除后无法恢复，确定吗？")
             .setPositiveButton("删除") { _, _ ->
                 notes.removeAll { it.uri == note.uri }
+                wordCounts.remove(note.uri)
                 adapter.submitEntries(notes)
 
                 val repo = repository
@@ -203,6 +215,8 @@ class CategoryActivity : AppCompatActivity() {
                                 }
                                 notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
                                 adapter.submitEntries(notes)
+                                // ✅ 重命名后刷新字数
+                                refreshList()
                             }
                         }.start()
                     }
