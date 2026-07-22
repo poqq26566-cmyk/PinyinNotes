@@ -90,6 +90,17 @@ class EditActivity : AppCompatActivity() {
         scrollReadView = findViewById(R.id.scrollReadView)
         tvReadView     = findViewById(R.id.tvReadView)
 
+        // ✅ 检查密钥是否就绪
+        val treeUri = getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE)
+            .getString("tree_uri", null)?.let { Uri.parse(it) }
+        if (!KeyManager.isReady() && (treeUri == null || !KeyManager.ensureReady(this, treeUri))) {
+            Toast.makeText(this, "密钥未就绪，请重新解锁", Toast.LENGTH_LONG).show()
+            startActivity(Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK))
+            finish()
+            return
+        }
+
         // ✅ 读取上次保存的模式偏好（默认 false = 编辑模式）
         isReadMode = prefs.getBoolean(noteUri.toString(), false)
 
@@ -101,13 +112,27 @@ class EditActivity : AppCompatActivity() {
         // 子线程读取内容（含解密），完成后才允许 TextWatcher 触发保存
         isLoadingContent = true
         Thread {
-            val content = DocStore.getContent(this, noteUri)
-            runOnUiThread {
-                editText.setText(content)
-                isLoadingContent = false
-                editText.requestFocus()
-                // ✅ 内容加载完成后应用模式
-                applyMode()
+            try {
+                val content = DocStore.getContent(this, noteUri)
+                runOnUiThread {
+                    editText.setText(content)
+                    isLoadingContent = false
+                    editText.requestFocus()
+                    // ✅ 内容加载完成后应用模式
+                    applyMode()
+                }
+            } catch (e: IllegalStateException) {
+                runOnUiThread {
+                    Toast.makeText(this, "读取失败：密钥未就绪，请重新解锁", Toast.LENGTH_LONG).show()
+                    startActivity(Intent(this, MainActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK))
+                    finish()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "读取笔记失败", Toast.LENGTH_LONG).show()
+                    finish()
+                }
             }
         }.start()
 
@@ -166,9 +191,20 @@ class EditActivity : AppCompatActivity() {
         }
     }
 
+    // ✅ writeToDisk 包一层 try/catch，避免保存时崩溃
     private fun writeToDisk(content: String) {
         Thread {
-            DocStore.setContent(this@EditActivity, noteUri, content)
+            try {
+                DocStore.setContent(this@EditActivity, noteUri, content)
+            } catch (e: IllegalStateException) {
+                runOnUiThread {
+                    Toast.makeText(this@EditActivity, "保存失败：密钥未就绪，请重新解锁", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this@EditActivity, "保存失败：${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }.start()
     }
 
