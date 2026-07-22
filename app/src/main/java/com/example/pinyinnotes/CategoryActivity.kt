@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
@@ -87,6 +88,12 @@ class CategoryActivity : AppCompatActivity() {
         return try {
             val content = DocStore.getContent(this, note.uri)
             content.replace(Regex("\\s+"), "").length
+        } catch (e: IllegalStateException) {
+            // 密钥未就绪，返回 0 并提示
+            runOnUiThread {
+                Toast.makeText(this, "密钥未就绪，请返回重新解锁", Toast.LENGTH_SHORT).show()
+            }
+            0
         } catch (e: Exception) {
             0
         }
@@ -162,7 +169,7 @@ class CategoryActivity : AppCompatActivity() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
         val clip = android.content.ClipData.newPlainText("note_name", note.name)
         clipboard.setPrimaryClip(clip)
-        android.widget.Toast.makeText(this, "已复制：${note.name}", android.widget.Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "已复制：${note.name}", Toast.LENGTH_SHORT).show()
     }
 
     private fun showRenameNoteDialog(note: Note) {
@@ -192,7 +199,7 @@ class CategoryActivity : AppCompatActivity() {
                                     if (curIdx >= 0) notes[curIdx] = renamed
                                 } else {
                                     if (curIdx >= 0) notes[curIdx] = oldNote
-                                    android.widget.Toast.makeText(this, "重命名失败", android.widget.Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(this, "重命名失败", Toast.LENGTH_SHORT).show()
                                 }
                                 notes.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
                                 adapter.submitEntries(notes)
@@ -224,7 +231,7 @@ class CategoryActivity : AppCompatActivity() {
 
     private fun openEdit(note: Note) {
         if (note.uri == Uri.EMPTY) {
-            android.widget.Toast.makeText(this, "正在处理，请稍等", android.widget.Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "正在处理，请稍等", Toast.LENGTH_SHORT).show()
             return
         }
         val intent = Intent(this, EditActivity::class.java)
