@@ -27,6 +27,7 @@ import androidx.recyclerview.widget.RecyclerView
 class MainActivity : AppCompatActivity() {
 
     private var categoryRepository: CategoryRepository? = null
+    private var pendingShareText: String? = null  // ✅ 解锁还没完成时，先把分享内容排队等着
     private lateinit var adapter: NoteAdapter<Category>
 
     private val prefs by lazy { getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE) }
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
                     try {
                         categoryRepository = CategoryRepository(this, uri)
                         refreshList()
+                        tryShowPendingShare()
                     } catch (e: Exception) {
                         Toast.makeText(this, "文件夹初始化失败，请重试", Toast.LENGTH_LONG).show()
                     }
@@ -99,6 +101,7 @@ class MainActivity : AppCompatActivity() {
                     try {
                         categoryRepository = CategoryRepository(this, uri)
                         refreshList()
+                        tryShowPendingShare()
                     } catch (e: Exception) {
                         categoryRepository = null
                         pickFolder()
@@ -136,7 +139,17 @@ class MainActivity : AppCompatActivity() {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (sharedText.isNullOrEmpty()) return
 
-        showSaveSharedTextDialog(sharedText)
+        // ✅ 先排队；如果这时候文件夹已经解锁完了就立刻弹，
+        // 没解锁完就先记着，等 onReady 里再补弹一次
+        pendingShareText = sharedText
+        tryShowPendingShare()
+    }
+
+    private fun tryShowPendingShare() {
+        val text = pendingShareText ?: return
+        if (categoryRepository == null) return  // 还没解锁完，等 onReady 再来调用一次
+        pendingShareText = null
+        showSaveSharedTextDialog(text)
     }
 
     private fun showSaveSharedTextDialog(text: String) {
