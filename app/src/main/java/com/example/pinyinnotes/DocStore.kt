@@ -2,7 +2,7 @@ package com.example.pinyinnotes
 
 import android.content.Context
 import android.net.Uri
-import android.provider.DocumentsContract  // ← 新增这个 import
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 
 /** 通用的加密内容读写 + 删除，不依赖具体所在文件夹 */
@@ -13,6 +13,9 @@ object DocStore {
         val bytes = input.use { it.readBytes() }
         return try {
             CryptoUtil.decryptContent(bytes)
+        } catch (e: IllegalStateException) {
+            // ✅ 密钥未就绪，不能当空笔记处理，向外抛出
+            throw e
         } catch (e: Exception) {
             ""
         }
@@ -27,7 +30,6 @@ object DocStore {
     /** 重命名文件或文件夹，成功返回新的 uri */
     fun rename(context: Context, uri: Uri, newEncodedName: String): Uri? {
         return try {
-            // ✅ 正确方式：使用 DocumentsContract.renameDocument()
             DocumentsContract.renameDocument(
                 context.contentResolver,
                 uri,
