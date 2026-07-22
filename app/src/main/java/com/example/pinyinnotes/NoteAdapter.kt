@@ -14,7 +14,8 @@ private data class EntryListItem<T : NamedItem>(val entry: T) : ListItem()
 class NoteAdapter<T : NamedItem>(
     private val onClick: (T) -> Unit,
     private val onLongClick: (T) -> Unit,
-    private val getWordCount: ((T) -> Int)? = null
+    private val getWordCount: ((T) -> Int)? = null,
+    private val getLastModified: ((T) -> Long)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val items = mutableListOf<ListItem>()
@@ -62,7 +63,8 @@ class NoteAdapter<T : NamedItem>(
                 item.entry as T,
                 onClick,
                 onLongClick,
-                getWordCount
+                getWordCount,
+                getLastModified
             )
         }
     }
@@ -94,18 +96,22 @@ class NoteAdapter<T : NamedItem>(
             entry: T,
             onClick: (T) -> Unit,
             onLongClick: (T) -> Unit,
-            getWordCount: ((T) -> Int)?
+            getWordCount: ((T) -> Int)?,
+            getLastModified: ((T) -> Long)?
         ) {
             textView.text = entry.name
 
-            if (getWordCount != null) {
+            val countText = if (getWordCount != null) {
                 val count = getWordCount(entry)
-                if (count > 0) {
-                    tvWordCount.text = count.toString() + "字"
-                    tvWordCount.visibility = View.VISIBLE
-                } else {
-                    tvWordCount.visibility = View.GONE
-                }
+                if (count > 0) "${count}字" else null
+            } else null
+
+            val timeText = getLastModified?.invoke(entry)?.takeIf { it > 0 }?.let { formatRelativeTime(it) }
+
+            val parts = listOfNotNull(countText, timeText)
+            if (parts.isNotEmpty()) {
+                tvWordCount.text = parts.joinToString(" · ")
+                tvWordCount.visibility = View.VISIBLE
             } else {
                 tvWordCount.visibility = View.GONE
             }
@@ -114,6 +120,29 @@ class NoteAdapter<T : NamedItem>(
             itemView.setOnLongClickListener {
                 onLongClick(entry)
                 true
+            }
+        }
+
+        // ✅ 把毫秒时间戳格式化成"2分钟前/3小时前/2天前/2周前/3个月前/2年前"这种相对时间
+        private fun formatRelativeTime(timestampMs: Long): String {
+            val diffMs = System.currentTimeMillis() - timestampMs
+            if (diffMs < 0) return "刚刚"
+
+            val minute = 60_000L
+            val hour = 60 * minute
+            val day = 24 * hour
+            val week = 7 * day
+            val month = 30 * day
+            val year = 365 * day
+
+            return when {
+                diffMs < minute -> "刚刚"
+                diffMs < hour -> "${diffMs / minute}分钟前"
+                diffMs < day -> "${diffMs / hour}小时前"
+                diffMs < week -> "${diffMs / day}天前"
+                diffMs < month -> "${diffMs / week}周前"
+                diffMs < year -> "${diffMs / month}个月前"
+                else -> "${diffMs / year}年前"
             }
         }
     }
