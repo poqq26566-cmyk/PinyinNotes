@@ -41,7 +41,8 @@ class CategoryActivity : AppCompatActivity() {
             adapter = NoteAdapter(
                 onClick = { note -> openEdit(note) },
                 onLongClick = { note -> showNoteOptions(note) },
-                getWordCount = { note -> wordCounts[note.uri] ?: 0 }
+                getWordCount = { note -> wordCounts[note.uri] ?: 0 },
+                getLastModified = { note -> note.lastModified }
             )
             recyclerView.adapter = adapter
 
