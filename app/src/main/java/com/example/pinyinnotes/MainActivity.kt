@@ -8,8 +8,11 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -150,16 +153,34 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // ✅ 让用户自己选择要保存到哪个分类，而不是固定存到第一个分类
-        val categoryNames = categories.map { it.name }.toTypedArray()
-        AlertDialog.Builder(this)
+        // ✅ 用自定义布局同时展示"内容预览"和"分类列表"
+        // （AlertDialog 的 setMessage 和 setItems 内容区互斥，同时用会导致列表被隐藏）
+        val categoryNames = categories.map { it.name }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val previewView = TextView(this).apply {
+            text = "${text.take(150)}${if (text.length > 150) "..." else ""}"
+            setPadding(48, 24, 48, 24)
+        }
+        val listView = ListView(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, categoryNames)
+        }
+        container.addView(previewView)
+        container.addView(listView)
+
+        val dialog = AlertDialog.Builder(this)
             .setTitle("📥 保存到哪个分类？")
-            .setMessage("${text.take(200)}${if (text.length > 200) "..." else ""}")
-            .setItems(categoryNames) { _, which ->
-                saveSharedTextToNewNote(text, categories[which])
-            }
+            .setView(container)
             .setNegativeButton("取消", null)
-            .show()
+            .create()
+
+        listView.setOnItemClickListener { _, _, position, _ ->
+            dialog.dismiss()
+            saveSharedTextToNewNote(text, categories[position])
+        }
+
+        dialog.show()
     }
 
     private fun saveSharedTextToNewNote(text: String, targetCategory: Category) {
