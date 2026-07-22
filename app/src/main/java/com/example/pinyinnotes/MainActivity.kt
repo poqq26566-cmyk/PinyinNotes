@@ -136,18 +136,29 @@ class MainActivity : AppCompatActivity() {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (sharedText.isNullOrEmpty()) return
 
-        // 延迟一下等界面加载完
-        handler.postDelayed({
-            showSaveSharedTextDialog(sharedText)
-        }, 500)
+        showSaveSharedTextDialog(sharedText)
     }
 
     private fun showSaveSharedTextDialog(text: String) {
-        if (categoryRepository == null) {
+        val repo = categoryRepository
+        if (repo == null) {
             Toast.makeText(this, "请先解锁并选择文件夹", Toast.LENGTH_SHORT).show()
             return
         }
 
+        // ✅ 不再依赖 500ms 硬编码延迟去猜"列表应该加载完了"
+        // 而是在这里重新从磁盘拉一次最新分类，加载完再弹窗，避免分类没加载完就弹出空列表
+        Thread {
+            val freshCategories = repo.getAllCategories().toMutableList()
+            runOnUiThread {
+                categories = freshCategories
+                adapter.submitEntries(categories)
+                showSaveSharedTextDialogWithCategories(text)
+            }
+        }.start()
+    }
+
+    private fun showSaveSharedTextDialogWithCategories(text: String) {
         // ✅ 用自定义布局同时展示"内容预览"和"分类列表"
         // （AlertDialog 的 setMessage 和 setItems 内容区互斥，同时用会导致列表被隐藏）
         // 列表第一项固定是"➕ 新建分类"，分类为空时也能直接在这里新建，不用再单独跳出去
@@ -525,6 +536,73 @@ class MainActivity : AppCompatActivity() {
             .setTitle("重命名分类")
             .setView(view)
             .setPositiveButton("确定") { _, _ ->
+                val name = editText.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    val repo = categoryRepository
+
+                    // 乐观更新：立刻显示在列表里，不等磁盘真正写完
+                    val tempCategory = Category(name, Uri.EMPTY)
+                    categories.add(tempCategory)
+                    categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
+                    adapter.submitEntries(categories)
+
+                    Thread {
+                        val realCategory = repo?.addCategory(name)
+                        runOnUiThread {
+                            val idx = categories.indexOfFirst { it === tempCategory }
+                            if (idx >= 0) {
+                                if (realCategory != null) {
+                                    categories[idx] = realCategory
+                                } else {
+                                    categories.removeAt(idx)
+                                }
+                                adapter.submitEntries(categories)
+                            }
+                        }
+                    }.start()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun confirmDeleteCategory(category: Category) {
+        AlertDialog.Builder(this)
+            .setTitle("删除分类\u201c${category.name}\u201d")
+            .setMessage("分类里的笔记会一起删除，确定吗？")
+            .setPositiveButton("删除") { _, _ ->
+                // 乐观更新：立刻从列表移除
+                categories.removeAll { it.uri == category.uri }
+                adapter.submitEntries(categories)
+
+                Thread {
+                    DocStore.delete(this, category.uri)
+                }.start()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showCategoryOptions(category: Category) {
+        AlertDialog.Builder(this)
+            .setTitle(category.name)
+            .setItems(arrayOf("重命名", "删除")) { _, which ->
+                when (which) {
+                    0 -> showRenameCategoryDialog(category)
+                    1 -> confirmDeleteCategory(category)
+                }
+            }
+            .show()
+    }
+
+    private fun showRenameCategoryDialog(category: Category) {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_add_note, null)
+        val editText = view.findViewById<EditText>(R.id.editName)
+        editText.setText(category.name)
+        AlertDialog.Builder(this)
+            .setTitle("重命名分类")
+            .setView(view)
+            .setPositiveButton("确定") { _, _ ->
                 val newName = editText.text.toString().trim()
                 if (newName.isNotEmpty() && newName != category.name) {
                     val repo = categoryRepository
@@ -607,3 +685,4 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 }
+                     
