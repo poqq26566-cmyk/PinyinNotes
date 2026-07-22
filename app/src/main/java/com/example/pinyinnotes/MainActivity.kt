@@ -140,17 +140,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSaveSharedTextDialog(text: String) {
-        AlertDialog.Builder(this)
-            .setTitle("📥 接收到分享内容")
-            .setMessage("是否保存到笔记？\n\n${text.take(200)}${if (text.length > 200) "..." else ""}")
-            .setPositiveButton("保存到新笔记") { _, _ ->
-                saveSharedTextToNewNote(text)
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun saveSharedTextToNewNote(text: String) {
         if (categoryRepository == null) {
             Toast.makeText(this, "请先解锁并选择文件夹", Toast.LENGTH_SHORT).show()
             return
@@ -161,7 +150,19 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val targetCategory = categories.first()
+        // ✅ 让用户自己选择要保存到哪个分类，而不是固定存到第一个分类
+        val categoryNames = categories.map { it.name }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("📥 保存到哪个分类？")
+            .setMessage("${text.take(200)}${if (text.length > 200) "..." else ""}")
+            .setItems(categoryNames) { _, which ->
+                saveSharedTextToNewNote(text, categories[which])
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun saveSharedTextToNewNote(text: String, targetCategory: Category) {
         val noteName = "分享_${System.currentTimeMillis() / 1000}"
 
         Toast.makeText(this, "正在保存...", Toast.LENGTH_SHORT).show()
@@ -554,4 +555,3 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 }
-                     
