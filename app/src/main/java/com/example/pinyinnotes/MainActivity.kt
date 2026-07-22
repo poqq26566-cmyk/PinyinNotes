@@ -20,13 +20,14 @@ import androidx.documentfile.provider.DocumentFile
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
+/** 首页：分类列表，点进分类才能看到里面的笔记 */
 class MainActivity : AppCompatActivity() {
 
     private var categoryRepository: CategoryRepository? = null
     private lateinit var adapter: NoteAdapter<Category>
 
     private val prefs by lazy { getSharedPreferences("pinyin_notes_prefs", MODE_PRIVATE) }
-    private var passwordDialog: AlertDialog? = null
+    private var passwordDialog: AlertDialog? = null  // ✅ 保存密码弹窗引用
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -84,6 +85,8 @@ class MainActivity : AppCompatActivity() {
         val btnCheckDuplicate: android.widget.Button = findViewById(R.id.btnCheckDuplicate)
         btnCheckDuplicate.setOnClickListener { checkDuplicates() }
 
+        // 启动时读取上次保存的文件夹：优先用本机免密缓存直接解锁，
+        // 没有缓存（比如刚装完 App 第一次配合旧文件夹，或缓存被清）才弹密码框
         val savedUri = prefs.getString("tree_uri", null)
         if (savedUri != null) {
             val uri = Uri.parse(savedUri)
@@ -104,6 +107,7 @@ class MainActivity : AppCompatActivity() {
             pickFolder()
         }
 
+        // ✅ 处理分享进来的内容
         handleShareIntent(intent)
     }
 
@@ -120,7 +124,7 @@ class MainActivity : AppCompatActivity() {
         refreshList()
     }
 
-    // ========== 接收分享 ==========
+    // ===================== ✅ 接收分享 =====================
 
     private fun handleShareIntent(intent: Intent) {
         if (intent.action != Intent.ACTION_SEND) return
@@ -129,44 +133,50 @@ class MainActivity : AppCompatActivity() {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (sharedText.isNullOrEmpty()) return
 
+        // 延迟一下等界面加载完
         handler.postDelayed({
             showSaveSharedTextDialog(sharedText)
         }, 500)
     }
 
     private fun showSaveSharedTextDialog(text: String) {
-        if (categories.isEmpty()) {
-            Toast.makeText(this, "请先创建分类", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val categoryNames = categories.map { it.name }.toTypedArray()
-
         AlertDialog.Builder(this)
-            .setTitle("📥 保存到哪个分类？")
-            .setItems(categoryNames) { _, which ->
-                val selectedCategory = categories[which]
-                saveSharedTextToNewNote(text, selectedCategory)
+            .setTitle("📥 接收到分享内容")
+            .setMessage("是否保存到笔记？\n\n${text.take(200)}${if (text.length > 200) "..." else ""}")
+            .setPositiveButton("保存到新笔记") { _, _ ->
+                saveSharedTextToNewNote(text)
             }
             .setNegativeButton("取消", null)
             .show()
     }
 
-    private fun saveSharedTextToNewNote(text: String, category: Category) {
+    private fun saveSharedTextToNewNote(text: String) {
+        if (categoryRepository == null) {
+            Toast.makeText(this, "请先解锁并选择文件夹", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (categories.isEmpty()) {
+            Toast.makeText(this, "请先创建分类", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val targetCategory = categories.first()
         val noteName = "分享_${System.currentTimeMillis() / 1000}"
 
-        Toast.makeText(this, "正在保存到「${category.name}」...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "正在保存...", Toast.LENGTH_SHORT).show()
 
         Thread {
             try {
-                val categoryDoc = DocumentFile.fromTreeUri(this, category.uri)
+                val categoryDoc = DocumentFile.fromTreeUri(this, targetCategory.uri)
                 if (categoryDoc != null) {
                     val repo = NoteRepository(this, categoryDoc)
                     val note = repo.addNote(noteName)
                     if (note != null) {
                         DocStore.setContent(this, note.uri, text)
                         runOnUiThread {
-                            Toast.makeText(this, "✅ 已保存到「${category.name}」", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this, "✅ 已保存到「${targetCategory.name}」", Toast.LENGTH_LONG).show()
+                            // 刷新列表
                             refreshList()
                         }
                     }
@@ -179,7 +189,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    // ========== 原有代码 ==========
+    // ===================== 原有代码 =====================
 
     private fun pickFolder() {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
@@ -192,9 +202,14 @@ class MainActivity : AppCompatActivity() {
         folderPicker.launch(intent)
     }
 
+    /**
+     * 解锁（或首次创建）指定文件夹的密钥。
+     * 全部完成后在主线程回调 onReady()；用户主动取消密码框则回调 onCancelled()。
+     */
     private fun ensureVaultUnlocked(uri: Uri, onReady: () -> Unit, onCancelled: () -> Unit) {
         val uriStr = uri.toString()
         Thread {
+            // 1. 优先用本机 Keystore 缓存，免密解锁
             val cachedBytes = VaultKeyCache.load(this, uriStr)
             if (cachedBytes != null) {
                 KeyManager.restoreFromCachedBytes(cachedBytes)
@@ -202,6 +217,7 @@ class MainActivity : AppCompatActivity() {
                 return@Thread
             }
 
+            // 2. 没有缓存：判断这个文件夹是不是第一次使用，决定弹"设置密码"还是"输入密码"
             val exists = KeyManager.vaultExists(this, uri)
             runOnUiThread {
                 promptPassword(
@@ -230,6 +246,7 @@ class MainActivity : AppCompatActivity() {
                     is KeyManager.UnlockResult.Success -> {
                         KeyManager.getKeyBytesOrNull()?.let { VaultKeyCache.save(this, uriStr, it) }
                         runOnUiThread {
+                            // ✅ 密码正确：关闭弹窗
                             passwordDialog?.dismiss()
                             passwordDialog = null
                             onReady()
@@ -237,6 +254,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     is KeyManager.UnlockResult.WrongPassword -> {
                         runOnUiThread {
+                            // ✅ 密码错误：恢复按钮和输入框状态
                             onWrongPassword("密码错误，请重试")
                         }
                     }
@@ -254,6 +272,7 @@ class MainActivity : AppCompatActivity() {
                 if (ok) {
                     KeyManager.getKeyBytesOrNull()?.let { VaultKeyCache.save(this, uriStr, it) }
                     runOnUiThread {
+                        // ✅ 创建成功：关闭弹窗
                         passwordDialog?.dismiss()
                         passwordDialog = null
                         onReady()
@@ -270,6 +289,11 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /**
+     * 弹出密码输入框。
+     * isNewVault=true：首次设置密码（需要二次确认）；false：输入密码解锁。
+     * onSubmit 的第二个参数用来在密码错误时显示错误提示，并让对话框继续留着重试。
+     */
     private fun promptPassword(
         isNewVault: Boolean,
         onSubmit: (password: String, onWrongPassword: (String) -> Unit) -> Unit,
@@ -281,6 +305,7 @@ class MainActivity : AppCompatActivity() {
         val editConfirm = view.findViewById<EditText>(R.id.editConfirmPassword)
         val tvError = view.findViewById<TextView>(R.id.tvError)
 
+        // ✅ 创建 ProgressBar 并添加到布局
         val progressBar = ProgressBar(view.context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -289,6 +314,7 @@ class MainActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
+        // ✅ 安全地添加 ProgressBar 到容器
         if (view is ViewGroup) {
             view.addView(progressBar)
         }
@@ -311,6 +337,7 @@ class MainActivity : AppCompatActivity() {
             }
             .create()
 
+        // ✅ 保存弹窗引用
         passwordDialog = dialog
 
         dialog.setOnShowListener {
@@ -328,13 +355,15 @@ class MainActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
 
+                // ✅ 清除错误，隐藏确定按钮，显示加载进度
                 tvError.visibility = View.GONE
-                positiveButton.visibility = View.GONE
+                positiveButton.visibility = View.GONE  // 直接隐藏确定按钮
                 progressBar.visibility = View.VISIBLE
                 editPassword.isEnabled = false
                 editConfirm.isEnabled = false
 
                 onSubmit(pwd) { errorMsg ->
+                    // ✅ 密码错误：恢复界面
                     positiveButton.visibility = View.VISIBLE
                     progressBar.visibility = View.GONE
                     editPassword.isEnabled = true
@@ -353,6 +382,8 @@ class MainActivity : AppCompatActivity() {
 
         dialog.show()
     }
+
+    // ---------------------------------------------------------------------
 
     private var categories = mutableListOf<Category>()
 
@@ -378,6 +409,7 @@ class MainActivity : AppCompatActivity() {
                 if (name.isNotEmpty()) {
                     val repo = categoryRepository
 
+                    // 乐观更新：立刻显示在列表里，不等磁盘真正写完
                     val tempCategory = Category(name, Uri.EMPTY)
                     categories.add(tempCategory)
                     categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
@@ -408,6 +440,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle("删除分类\u201c${category.name}\u201d")
             .setMessage("分类里的笔记会一起删除，确定吗？")
             .setPositiveButton("删除") { _, _ ->
+                // 乐观更新：立刻从列表移除
                 categories.removeAll { it.uri == category.uri }
                 adapter.submitEntries(categories)
 
@@ -521,3 +554,4 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 }
+                     
