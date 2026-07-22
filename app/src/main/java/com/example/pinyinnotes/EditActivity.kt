@@ -304,12 +304,28 @@ class EditActivity : AppCompatActivity() {
         if (preferredPackage != null) {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
             intent.setPackage(preferredPackage)
-            try {
-                startActivity(intent)
-                return
-            } catch (e: Exception) {
-                // 选的应用打不开，继续走兜底
+            // ✅ 先用 resolveActivity 判断该App是否真的能处理这个链接
+            // （比如微信这类App虽然出现在选择列表里，但并未注册处理网页链接的能力）
+            if (intent.resolveActivity(packageManager) != null) {
+                try {
+                    startActivity(intent)
+                    return
+                } catch (e: Exception) {
+                    // 选的应用打不开，继续走兜底
+                }
             }
+            // 走到这里说明所选App无法处理该链接，明确告知用户，而不是静默换成系统默认方式
+            val appLabel = try {
+                packageManager.getApplicationInfo(preferredPackage, 0)
+                    .loadLabel(packageManager).toString()
+            } catch (e: Exception) {
+                preferredPackage
+            }
+            Toast.makeText(
+                this,
+                "「$appLabel」无法打开此链接，已改用系统默认方式",
+                Toast.LENGTH_SHORT
+            ).show()
         }
 
         // ✅ 兜底方案1：用和 Linkify 一样的方式（添加 CATEGORY_BROWSABLE）
