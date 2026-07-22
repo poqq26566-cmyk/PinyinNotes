@@ -190,15 +190,32 @@ class MainActivity : AppCompatActivity() {
                 return@setOnItemClickListener
             }
             dialog.dismiss()
-            saveSharedTextToNewNote(text, categories[position - 1])
+            promptNoteNameThenSave(text, categories[position - 1])
         }
 
         dialog.show()
     }
 
-    private fun saveSharedTextToNewNote(text: String, targetCategory: Category) {
-        val noteName = "分享_${System.currentTimeMillis() / 1000}"
+    private fun promptNoteNameThenSave(text: String, targetCategory: Category) {
+        val defaultName = "分享_${System.currentTimeMillis() / 1000}"
+        val editText = EditText(this).apply {
+            setSingleLine(true)
+        }
+        editText.setText(defaultName)
+        editText.setSelection(0, defaultName.length) // 全选，方便直接输入覆盖
 
+        AlertDialog.Builder(this)
+            .setTitle("笔记文件名")
+            .setView(editText)
+            .setPositiveButton("保存") { _, _ ->
+                val noteName = editText.text.toString().trim().ifEmpty { defaultName }
+                saveSharedTextToNewNote(text, targetCategory, noteName)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun saveSharedTextToNewNote(text: String, targetCategory: Category, noteName: String) {
         Toast.makeText(this, "正在保存...", Toast.LENGTH_SHORT).show()
 
         Thread {
@@ -451,7 +468,7 @@ class MainActivity : AppCompatActivity() {
                             categories.sortWith(compareBy({ PinyinUtils.getFirstLetter(it.name) }, { it.name }))
                             adapter.submitEntries(categories)
                             parentDialog.dismiss()
-                            saveSharedTextToNewNote(text, realCategory)
+                            promptNoteNameThenSave(text, realCategory)
                         } else {
                             Toast.makeText(this, "新建分类失败", Toast.LENGTH_SHORT).show()
                         }
