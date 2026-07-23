@@ -289,7 +289,10 @@ class EditActivity : AppCompatActivity() {
 
         // ✅ 第二步：把 Linkify 生成的所有 URLSpan 替换成走 openLink() 的 ClickableSpan
         // 这样裸 URL 和 Markdown 链接行为完全一致，都遵循用户设置的默认 App 偏好
-        val spannable = tvReadView.text as? SpannableStringBuilder ?: return
+        // ✅ 注意：必须用 android.text.Spannable 而不是 SpannableStringBuilder
+        // 因为 tvReadView.text 赋值后 TextView 内部会把它转成 SpannableString，
+        // 强转 SpannableStringBuilder 会失败导致直接 return，URLSpan 替换逻辑完全不执行！
+        val spannable = tvReadView.text as? android.text.Spannable ?: return
         val urlSpans = spannable.getSpans(0, spannable.length, URLSpan::class.java)
         for (urlSpan in urlSpans) {
             val start = spannable.getSpanStart(urlSpan)
@@ -323,7 +326,7 @@ class EditActivity : AppCompatActivity() {
         // ✅ 只对裸 URL 补 https://，已有 http:// 或 https:// 的保持不动
         var finalUrl = url
         if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-            finalUrl = "https://$finalUrl"  // ← 这里是唯一改动，http → https
+            finalUrl = "https://$finalUrl"
         }
 
         val preferredPackage = LinkAppPreference.get(this, noteUri)
@@ -331,6 +334,7 @@ class EditActivity : AppCompatActivity() {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
             intent.setPackage(preferredPackage)
             // ✅ 先用 resolveActivity 判断该App是否真的能处理这个链接
+            // （比如微信这类App虽然出现在选择列表里，但并未注册处理网页链接的能力）
             if (intent.resolveActivity(packageManager) != null) {
                 try {
                     startActivity(intent)
@@ -339,6 +343,7 @@ class EditActivity : AppCompatActivity() {
                     // 选的应用打不开，继续走兜底
                 }
             }
+            // 走到这里说明所选App无法处理该链接，明确告知用户，而不是静默换成系统默认方式
             val appLabel = try {
                 packageManager.getApplicationInfo(preferredPackage, 0)
                     .loadLabel(packageManager).toString()
