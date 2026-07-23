@@ -13,6 +13,7 @@ import android.text.TextWatcher
 import android.text.method.ArrowKeyMovementMethod
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
+import android.text.style.URLSpan
 import android.text.util.Linkify
 import android.os.Handler
 import android.os.Looper
@@ -235,7 +236,8 @@ class EditActivity : AppCompatActivity() {
      * - 混合： [文字］（URL) 等
      *
      * ✅ URL为空时只渲染文字，不加点击效果
-     * 剩余裸 URL 由 Linkify 自动处理
+     * ✅ 裸 URL 由 Linkify 识别后，统一替换为走 openLink() 的 ClickableSpan，
+     *    确保所有链接都遵循用户设置的默认 App 偏好，不会出现不同链接打开不同浏览器的问题
      */
     private fun renderMarkdownLinks(text: String) {
         val builder = SpannableStringBuilder()
@@ -281,8 +283,32 @@ class EditActivity : AppCompatActivity() {
         builder.append(text.substring(lastEnd))
 
         tvReadView.text = builder
-        // 对剩余裸 URL 也自动识别为可点击链接
+
+        // ✅ 第一步：让 Linkify 识别裸 URL（生成 URLSpan）
         Linkify.addLinks(tvReadView, Linkify.WEB_URLS)
+
+        // ✅ 第二步：把 Linkify 生成的所有 URLSpan 替换成走 openLink() 的 ClickableSpan
+        // 这样裸 URL 和 Markdown 链接行为完全一致，都遵循用户设置的默认 App 偏好
+        val spannable = tvReadView.text as? SpannableStringBuilder ?: return
+        val urlSpans = spannable.getSpans(0, spannable.length, URLSpan::class.java)
+        for (urlSpan in urlSpans) {
+            val start = spannable.getSpanStart(urlSpan)
+            val end   = spannable.getSpanEnd(urlSpan)
+            val url   = urlSpan.url
+            spannable.removeSpan(urlSpan)   // 移除 Linkify 原来的 URLSpan
+            spannable.setSpan(
+                object : ClickableSpan() {
+                    override fun onClick(widget: View) { openLink(url) }
+                    override fun updateDrawState(ds: android.text.TextPaint) {
+                        super.updateDrawState(ds)
+                        ds.color           = 0xFF1565C0.toInt()
+                        ds.isUnderlineText = true
+                    }
+                },
+                start, end,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
     }
 
     /**
