@@ -295,7 +295,7 @@ class EditActivity : AppCompatActivity() {
             val start = spannable.getSpanStart(urlSpan)
             val end   = spannable.getSpanEnd(urlSpan)
             val url   = urlSpan.url
-            spannable.removeSpan(urlSpan)   // 移除 Linkify 原来的 URLSpan
+            spannable.removeSpan(urlSpan)
             spannable.setSpan(
                 object : ClickableSpan() {
                     override fun onClick(widget: View) { openLink(url) }
@@ -320,10 +320,10 @@ class EditActivity : AppCompatActivity() {
             return
         }
 
-        // ✅ 强制添加 http:// 前缀（如果没有的话），与 Linkify 行为一致
+        // ✅ 只对裸 URL 补 https://，已有 http:// 或 https:// 的保持不动
         var finalUrl = url
         if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
-            finalUrl = "http://$finalUrl"
+            finalUrl = "https://$finalUrl"  // ← 这里是唯一改动，http → https
         }
 
         val preferredPackage = LinkAppPreference.get(this, noteUri)
@@ -331,7 +331,6 @@ class EditActivity : AppCompatActivity() {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(finalUrl))
             intent.setPackage(preferredPackage)
             // ✅ 先用 resolveActivity 判断该App是否真的能处理这个链接
-            // （比如微信这类App虽然出现在选择列表里，但并未注册处理网页链接的能力）
             if (intent.resolveActivity(packageManager) != null) {
                 try {
                     startActivity(intent)
@@ -340,7 +339,6 @@ class EditActivity : AppCompatActivity() {
                     // 选的应用打不开，继续走兜底
                 }
             }
-            // 走到这里说明所选App无法处理该链接，明确告知用户，而不是静默换成系统默认方式
             val appLabel = try {
                 packageManager.getApplicationInfo(preferredPackage, 0)
                     .loadLabel(packageManager).toString()
